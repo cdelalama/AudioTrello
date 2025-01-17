@@ -51,6 +51,7 @@ export interface User {
 	is_approved: boolean; // Para saber si el usuario está aprobado para usar el bot
 	trello_token: string | null; // Token de acceso a Trello
 	trello_username: string | null; // Username de Trello
+	trello_member_id: string | null; // Añadir este campo
 	default_board_id: string | null; // ID del tablero por defecto
 	default_list_id: string | null; // ID de la lista por defecto
 	default_board_name: string | null; // Añadir este campo
@@ -90,7 +91,7 @@ export interface TranscriptionConfig {
 	fallbackEnabled: boolean;
 }
 
-export type TaskDuration = "quick_task" | "short_task" | "medium_task" | "extended_task";
+export type TaskDuration = "very_short" | "short" | "medium" | "long";
 export type TaskPriority = "high" | "medium" | "low";
 
 export interface TrelloTaskData {

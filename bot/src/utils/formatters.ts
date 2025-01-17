@@ -2,10 +2,10 @@ import { TaskDuration, TaskPriority } from "../../types/types";
 
 export function formatDuration(duration: TaskDuration): string {
 	const formats = {
-		quick_task: "⚡ Muy rápida (< 4h)",
-		short_task: "🕐 Corta (1 día)",
-		medium_task: "📅 Media (hasta 5 días)",
-		extended_task: "📆 Larga (> 5 días)",
+		very_short: "⚡ Muy rápida (< 4h)",
+		short: "🕐 Corta (1 día)",
+		medium: "📅 Media (hasta 5 días)",
+		long: "�� Larga (> 5 días)",
 	};
 	return formats[duration];
 }

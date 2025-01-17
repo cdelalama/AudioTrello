@@ -73,7 +73,7 @@ export class TaskProcessor {
       "task": {
         "title": "string",
         "description": "string",
-        "duration": "quick_task|short_task|medium_task|extended_task",
+        "duration": "very_short|short|medium|long",
         "priority": "high|medium|low",
         "assignedTo": "string?"
       },
@@ -90,7 +90,7 @@ export class TaskProcessor {
       "task": {
         "title": "string",
         "description": "string",
-        "duration": "quick_task|short_task|medium_task|extended_task",
+        "duration": "very_short|short|medium|long",
         "priority": "high|medium|low"
       },
       "summary": "string describing what was updated in Spanish"
@@ -150,7 +150,7 @@ export class TaskProcessor {
 			const taskData: TrelloTaskData = {
 				title: result.task.title,
 				description: result.task.description,
-				duration: result.task.duration || "medium_task",
+				duration: result.task.duration || "medium",
 				priority: result.task.priority || "medium",
 				assignedTo: result.task.assignedTo || userId,
 			};
