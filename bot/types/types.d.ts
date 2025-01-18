@@ -32,6 +32,11 @@ export interface Database {
 					updated_at?: string;
 				};
 			};
+			pending_tasks: {
+				Row: PendingTask;
+				Insert: Omit<PendingTask, "id">;
+				Update: Partial<Omit<PendingTask, "id">>;
+			};
 		};
 	};
 }
@@ -81,6 +86,25 @@ export interface TranscriptionServiceConfig {
 export interface TranscriptionConfig {
 	services: TranscriptionServiceConfig[];
 	fallbackEnabled: boolean;
+}
+
+export type TaskDuration = "quick_task" | "short_task" | "medium_task" | "extended_task";
+export type TaskPriority = "high" | "medium" | "low";
+
+export interface TrelloTaskData {
+	title: string;
+	description: string;
+	duration: TaskDuration;
+	priority: TaskPriority;
+	assignedTo?: string; // Opcional, por defecto será el usuario actual
+}
+
+export interface PendingTask {
+	id: number;
+	task_data: TrelloTaskData;
+	user_id: number;
+	created_at: string;
+	expires_at: string;
 }
 
 export {};

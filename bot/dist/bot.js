@@ -11,8 +11,11 @@ const console_1 = require("./utils/console");
 const helpCommand_1 = require("./commands/helpCommand");
 const supabaseClient_1 = require("./services/supabaseClient");
 const TranscriptionServiceFactory_1 = require("./services/transcription/TranscriptionServiceFactory");
-const configService_1 = require("./services/configService");
 const config_2 = require("./config");
+const taskProcessor_1 = require("./services/taskProcessor");
+const audioProcessor_1 = require("./services/audioProcessor");
+const formatters_1 = require("./utils/formatters");
+const supabaseClient_2 = require("./services/supabaseClient");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -50,58 +53,125 @@ bot.use(async (ctx, next) => {
 (0, startCommand_1.setupStartCommand)(bot);
 (0, adminCommands_1.setupAdminCommands)(bot);
 (0, helpCommand_1.setupHelpCommand)(bot);
-// Función helper para procesar audio
-async function processAudio(ctx, audioData) {
-    await ctx.reply("🔍 Processing your audio...");
+// Manejador para mensajes de voz
+bot.on("message:voice", async (ctx) => {
     try {
-        const file = await ctx.getFile();
-        const fileUrl = `https://api.telegram.org/file/bot${config_1.config.botToken}/${file.file_path}`;
-        const response = await fetch(fileUrl);
-        const buffer = await response.arrayBuffer();
-        const audioBuffer = Buffer.from(buffer);
-        // Intentar con el servicio primario
-        const primaryServiceName = await configService_1.configService.getPrimaryService();
-        const primaryService = TranscriptionServiceFactory_1.TranscriptionServiceFactory.getService(primaryServiceName);
-        try {
-            const transcription = await primaryService.transcribe(audioBuffer);
-            await ctx.reply(`📝 ${primaryServiceName} Transcription:\n${transcription}`);
+        await ctx.reply("🔍 Procesando tu audio...");
+        const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+        if (!user) {
+            await ctx.reply("❌ Usuario no encontrado");
             return;
         }
-        catch (error) {
-            console.log(`${primaryServiceName} transcription failed, trying fallback...`);
-            const fallbackServices = await configService_1.configService.getFallbackServices();
-            if (!fallbackServices.length) {
-                throw error;
-            }
-            // Intentar con el primer fallback disponible
-            const fallbackService = TranscriptionServiceFactory_1.TranscriptionServiceFactory.getService(fallbackServices[0]);
-            const transcription = await fallbackService.transcribe(audioBuffer);
-            await ctx.reply(`🔊 ${fallbackServices[0]} Transcription (fallback):\n${transcription}`);
+        const file = await ctx.getFile();
+        const transcription = await audioProcessor_1.AudioProcessor.processAudioFile(file);
+        // Verificar si hay una tarea pendiente reciente
+        const recentTask = await taskProcessor_1.TaskProcessor.getRecentPendingTask(user.id);
+        if (recentTask) {
+            // Añadir información a la tarea existente
+            const updatedTask = await taskProcessor_1.TaskProcessor.appendToExistingTask(recentTask.id, transcription, user.id.toString());
+            // Mostrar la tarea actualizada
+            await ctx.reply(`📝 *Tarea Actualizada*\n\n` +
+                `*Título:* ${updatedTask.taskData.title}\n` +
+                `*Duración:* ${(0, formatters_1.formatDuration)(updatedTask.taskData.duration)}\n` +
+                `*Prioridad:* ${(0, formatters_1.formatPriority)(updatedTask.taskData.priority)}\n\n` +
+                `*Descripción:*\n${updatedTask.taskData.description}\n\n` +
+                `¿Qué quieres hacer?`, {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "✅ Crear tarea",
+                                callback_data: `create_task:${recentTask.id}`,
+                            },
+                            { text: "❌ Cancelar", callback_data: "cancel_task" },
+                        ],
+                    ],
+                },
+            });
+            return; // Importante: no seguir con el proceso de nueva tarea
         }
+        const result = await taskProcessor_1.TaskProcessor.processTranscription(transcription, ctx.from.id.toString());
+        if (!result.isValidTask || !result.taskData) {
+            await ctx.reply(`❌ ${result.message}`);
+            return;
+        }
+        const taskId = await taskProcessor_1.TaskProcessor.storePendingTask(result.taskData, user.id);
+        // Crear mensaje con botones
+        await ctx.reply(`📝 *Nueva Tarea*\n\n` +
+            `*Título:* ${result.taskData.title}\n` +
+            `*Duración:* ${(0, formatters_1.formatDuration)(result.taskData.duration)}\n` +
+            `*Prioridad:* ${(0, formatters_1.formatPriority)(result.taskData.priority)}\n\n` +
+            `*Descripción:*\n${result.taskData.description}\n\n` +
+            `¿Qué quieres hacer?`, {
+            parse_mode: "Markdown",
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        {
+                            text: "✅ Crear tarea",
+                            callback_data: `create_task:${taskId}`,
+                        },
+                        { text: "❌ Cancelar", callback_data: "cancel_task" },
+                    ],
+                ],
+            },
+        });
     }
     catch (error) {
-        console.error("Error processing audio:", error);
-        await ctx.reply("⚠️ Error processing audio. Please try again.");
+        console.error("Error processing voice message:", error);
+        await ctx.reply("⚠️ Error procesando el mensaje de voz. Por favor, inténtalo de nuevo.");
     }
-}
+});
 // Manejador para archivos de audio
 bot.on("message:audio", async (ctx) => {
     try {
-        await processAudio(ctx, ctx.message.audio);
+        await ctx.reply("🔍 Processing your audio...");
+        const file = await ctx.getFile();
+        const transcription = await audioProcessor_1.AudioProcessor.processAudioFile(file);
+        await ctx.reply(`📝 Transcription:\n${transcription}`);
     }
     catch (error) {
         console.error("Error processing audio file:", error);
         await ctx.reply("⚠️ Error processing audio. Please try again.");
     }
 });
-// Manejador para mensajes de voz
-bot.on("message:voice", async (ctx) => {
+// Manejador para los botones
+bot.callbackQuery(/create_task:(.+)/, async (ctx) => {
+    const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+    if (!user) {
+        await ctx.reply("❌ Usuario no encontrado");
+        return;
+    }
+    const taskId = ctx.match[1];
+    const taskData = await taskProcessor_1.TaskProcessor.getPendingTask(taskId, user.id);
+    if (!taskData) {
+        await ctx.reply("❌ La tarea ha expirado. Por favor, crea una nueva.");
+        return;
+    }
+    // Aquí iría la lógica para crear la tarea en Trello
+    await ctx.reply("✅ ¡Tarea creada con éxito!");
+});
+bot.callbackQuery("add_more_info", async (ctx) => {
+    await ctx.reply("🎤 Vale, envíame otro audio con la información adicional.");
+});
+bot.callbackQuery("cancel_task", async (ctx) => {
     try {
-        await processAudio(ctx, ctx.message.voice);
+        const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+        if (!user) {
+            await ctx.reply("❌ Usuario no encontrado");
+            return;
+        }
+        // Obtener y eliminar la tarea más reciente
+        const recentTask = await taskProcessor_1.TaskProcessor.getRecentPendingTask(user.id);
+        if (recentTask) {
+            await supabaseClient_2.supabase.from("pending_tasks").delete().eq("id", recentTask.id);
+        }
+        await ctx.reply("❌ Tarea cancelada.");
     }
     catch (error) {
-        console.error("Error processing voice message:", error);
-        await ctx.reply("⚠️ Error processing voice message. Please try again.");
+        console.error("Error canceling task:", error);
+        await ctx.reply("⚠️ Error al cancelar la tarea.");
     }
 });
 // Start the bot
