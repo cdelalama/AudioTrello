@@ -22,6 +22,9 @@ export function setupStartCommand(bot: Bot) {
 			// Si el usuario ya está aprobado
 			if (user?.is_approved) {
 				await ctx.reply(messages.welcome.approved);
+				await ctx.reply(helpMessages.start, {
+					parse_mode: "Markdown",
+				});
 				return;
 			}
 

@@ -4,6 +4,7 @@ exports.setupStartCommand = setupStartCommand;
 const grammy_1 = require("grammy");
 const userService_1 = require("../services/userService");
 const messages_1 = require("../messages/messages");
+const helpMessages_1 = require("../messages/helpMessages");
 function setupStartCommand(bot) {
     bot.command("start", async (ctx) => {
         try {
@@ -20,6 +21,9 @@ function setupStartCommand(bot) {
             // Si el usuario ya está aprobado
             if (user?.is_approved) {
                 await ctx.reply(messages_1.messages.welcome.approved);
+                await ctx.reply(helpMessages_1.helpMessages.start, {
+                    parse_mode: "Markdown",
+                });
                 return;
             }
             // Si el usuario existe pero no está aprobado

@@ -1,5 +1,7 @@
 import { Bot } from "grammy";
 import { userService } from "../services/userService";
+import { messages } from "../messages/messages";
+import { helpMessages } from "../messages/helpMessages";
 
 export function setupAdminCommands(bot: Bot) {
 	// Approve command
@@ -118,7 +120,11 @@ export function setupAdminCommands(bot: Bot) {
 			switch (action) {
 				case "accept":
 					await userService.approveUser(telegramId);
-					await ctx.api.sendMessage(telegramId, "✅ Your account has been approved!");
+					await ctx.api.sendMessage(telegramId, messages.welcome.approved);
+					// Enviar mensaje de ayuda después de la aprobación
+					await ctx.api.sendMessage(telegramId, helpMessages.start, {
+						parse_mode: "Markdown",
+					});
 					await ctx.editMessageText("User approved ✅");
 					break;
 				case "reject":

@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setupAdminCommands = setupAdminCommands;
 const userService_1 = require("../services/userService");
+const messages_1 = require("../messages/messages");
+const helpMessages_1 = require("../messages/helpMessages");
 function setupAdminCommands(bot) {
     // Approve command
     bot.command("approve", async (ctx) => {
@@ -104,7 +106,11 @@ function setupAdminCommands(bot) {
             switch (action) {
                 case "accept":
                     await userService_1.userService.approveUser(telegramId);
-                    await ctx.api.sendMessage(telegramId, "✅ Your account has been approved!");
+                    await ctx.api.sendMessage(telegramId, messages_1.messages.welcome.approved);
+                    // Enviar mensaje de ayuda después de la aprobación
+                    await ctx.api.sendMessage(telegramId, helpMessages_1.helpMessages.start, {
+                        parse_mode: "Markdown",
+                    });
                     await ctx.editMessageText("User approved ✅");
                     break;
                 case "reject":
