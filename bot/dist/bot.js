@@ -4,7 +4,7 @@ const grammy_1 = require("grammy");
 const files_1 = require("@grammyjs/files");
 const userService_1 = require("./services/userService");
 const config_1 = require("./config");
-const messages_1 = require("./messages");
+const messages_1 = require("./messages/messages");
 const startCommand_1 = require("./commands/startCommand");
 const adminCommands_1 = require("./commands/adminCommands");
 const console_1 = require("./utils/console");
@@ -18,8 +18,8 @@ const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
 // Middleware para verificar usuario
 bot.use(async (ctx, next) => {
-    // Skip middleware for /start command
-    if (ctx.message?.text === "/start") {
+    // Skip middleware for /start command and approval request
+    if (ctx.message?.text === "/start" || ctx.callbackQuery?.data === "request_approval") {
         await next();
         return;
     }

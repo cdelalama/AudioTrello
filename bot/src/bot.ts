@@ -3,7 +3,7 @@ import { hydrateFiles } from "@grammyjs/files";
 import { Audio } from "grammy/types";
 import { userService } from "./services/userService";
 import { config } from "./config";
-import { messages } from "./messages";
+import { messages } from "./messages/messages";
 import { setupStartCommand } from "./commands/startCommand";
 import { setupAdminCommands } from "./commands/adminCommands";
 import { showWelcomeBanner } from "./utils/console";
@@ -19,8 +19,8 @@ bot.api.config.use(hydrateFiles(bot.token));
 
 // Middleware para verificar usuario
 bot.use(async (ctx, next) => {
-	// Skip middleware for /start command
-	if (ctx.message?.text === "/start") {
+	// Skip middleware for /start command and approval request
+	if (ctx.message?.text === "/start" || ctx.callbackQuery?.data === "request_approval") {
 		await next();
 		return;
 	}

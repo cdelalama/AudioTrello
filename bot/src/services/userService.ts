@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { InlineKeyboard } from "grammy";
 
 export const userService = {
 	// Verificar si un usuario existe y está aprobado
@@ -107,11 +108,18 @@ export const userService = {
 	},
 
 	// Notificar a todos los admins
-	async notifyAdmins(bot: any, message: string): Promise<void> {
+	async notifyAdmins(api: any, message: string, requesterId: number): Promise<void> {
 		const admins = await this.getAllAdmins();
+		const keyboard = new InlineKeyboard()
+			.text("Accept ✅", `user_accept_${requesterId}`)
+			.text("Reject ❌", `user_reject_${requesterId}`)
+			.text("Cancel ⏳", `user_cancel_${requesterId}`);
+
 		for (const admin of admins) {
 			try {
-				await bot.api.sendMessage(admin.telegram_id, message);
+				await api.sendMessage(admin.telegram_id, message, {
+					reply_markup: keyboard,
+				});
 			} catch (error) {
 				console.error(`Error notifying admin ${admin.telegram_id}:`, error);
 			}
@@ -141,5 +149,28 @@ export const userService = {
 			.order("created_at", { ascending: false });
 
 		return data || [];
+	},
+
+	async createUser(userData: Omit<User, "id" | "created_at">): Promise<boolean> {
+		try {
+			const { error } = await supabase.from("users").insert(userData);
+			return !error;
+		} catch (error) {
+			console.error("Error creating user:", error);
+			return false;
+		}
+	},
+
+	async requestApproval(telegramId: number): Promise<boolean> {
+		try {
+			const { error } = await supabase
+				.from("users")
+				.update({ approval_requested: true })
+				.eq("telegram_id", telegramId);
+			return !error;
+		} catch (error) {
+			console.error("Error requesting approval:", error);
+			return false;
+		}
 	},
 };

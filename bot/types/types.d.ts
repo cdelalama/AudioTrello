@@ -50,6 +50,7 @@ declare global {
 		trello_username: string | null; // Username de Trello
 		default_board_id: string | null; // ID del tablero por defecto
 		default_list_id: string | null; // ID de la lista por defecto
+		approval_requested: boolean; // Para saber si ya solicitó aprobación
 	}
 
 	// Task table

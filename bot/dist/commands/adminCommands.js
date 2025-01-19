@@ -88,4 +88,39 @@ function setupAdminCommands(bot) {
             await ctx.reply("⚠️ An error occurred while fetching pending users");
         }
     });
+    // Manejadores para los botones de aprobación
+    bot.callbackQuery(/^user_(.+)_(\d+)$/, async (ctx) => {
+        try {
+            if (!ctx.from || !ctx.match)
+                return;
+            // Verificar que quien pulsa es admin
+            const admin = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+            if (!admin?.is_admin) {
+                await ctx.answerCallbackQuery("⚠️ Only admins can perform this action");
+                return;
+            }
+            const [, action, userId] = ctx.match;
+            const telegramId = parseInt(userId);
+            switch (action) {
+                case "accept":
+                    await userService_1.userService.approveUser(telegramId);
+                    await ctx.api.sendMessage(telegramId, "✅ Your account has been approved!");
+                    await ctx.editMessageText("User approved ✅");
+                    break;
+                case "reject":
+                    await userService_1.userService.toggleBan(telegramId);
+                    await ctx.api.sendMessage(telegramId, "❌ Your request has been rejected.");
+                    await ctx.editMessageText("User rejected ❌");
+                    break;
+                case "cancel":
+                    await ctx.editMessageText("Action cancelled ⏳");
+                    break;
+            }
+            await ctx.answerCallbackQuery();
+        }
+        catch (error) {
+            console.error("Error in admin action:", error);
+            await ctx.answerCallbackQuery("Error processing action");
+        }
+    });
 }

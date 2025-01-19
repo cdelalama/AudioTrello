@@ -1,74 +1,102 @@
-import { Bot, Keyboard } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import { userService } from "../services/userService";
-import { messages } from "../messages";
+import { messages } from "../messages/messages";
 import { helpMessages } from "../messages/helpMessages";
 
 export function setupStartCommand(bot: Bot) {
 	bot.command("start", async (ctx) => {
 		try {
-			const user = ctx.from;
-			if (!user) {
+			if (!ctx.from) {
 				await ctx.reply(messages.errors.noUser);
 				return;
 			}
 
-			// Verificar si está baneado
-			if (await userService.isBanned(user.id)) {
-				await ctx.reply(messages.errors.banned);
+			const user = await userService.getUserByTelegramId(ctx.from.id);
+
+			// Primero verificar si está baneado
+			if (user && !user.is_active) {
+				await ctx.reply(messages.welcome.banned);
 				return;
 			}
 
-			// Check if user exists
-			const existingUser = await userService.getUserByTelegramId(user.id);
+			// Si el usuario ya está aprobado
+			if (user?.is_approved) {
+				await ctx.reply(messages.welcome.approved);
+				return;
+			}
 
-			if (!existingUser) {
-				// Try to register as admin first
-				const registeredAsAdmin = await userService.registerInitialAdmin(
-					user.id,
-					user.username || user.first_name
-				);
-
-				if (registeredAsAdmin) {
-					await ctx.reply(messages.welcome.adminCreated);
-					await ctx.reply(helpMessages.start + "\n\n" + helpMessages.admin, {
-						parse_mode: "Markdown",
-					});
+			// Si el usuario existe pero no está aprobado
+			if (user) {
+				if (user.approval_requested) {
+					await ctx.reply(messages.welcome.alreadyRequested);
 					return;
 				}
-
-				// If not admin, register as normal user
-				const registered = await userService.registerUser(
-					user.id,
-					user.username || user.first_name
+				const keyboard = new InlineKeyboard().text(
+					"Request Approval 🔑",
+					"request_approval"
 				);
-
-				if (registered) {
-					const keyboard = new Keyboard().text(messages.welcome.requestButton).resized();
-					await ctx.reply(messages.welcome.newUser, { reply_markup: keyboard });
-					await ctx.reply(helpMessages.start, { parse_mode: "Markdown" });
-
-					// Notify admins
-					await userService.notifyAdmins(
-						bot,
-						messages.admin.newRequest(user.username || user.first_name, user.id)
-					);
-				} else {
-					await ctx.reply(messages.errors.registration);
-				}
-			} else if (!existingUser.is_approved) {
-				await ctx.reply(messages.welcome.alreadyRequested);
-			} else {
-				await ctx.reply(messages.welcome.approved);
-				await ctx.reply(
-					helpMessages.start + (existingUser.is_admin ? "\n\n" + helpMessages.admin : ""),
-					{
-						parse_mode: "Markdown",
-					}
-				);
+				await ctx.reply(messages.welcome.notApproved, { reply_markup: keyboard });
+				return;
 			}
+
+			// Usuario nuevo
+			await userService.createUser({
+				telegram_id: ctx.from.id,
+				username: ctx.from.username || ctx.from.first_name || "Unknown",
+				is_approved: false,
+				approval_requested: false,
+				is_active: true,
+				is_admin: false,
+				trello_token: null,
+				trello_username: null,
+				default_board_id: null,
+				default_list_id: null,
+			});
+
+			const keyboard = new InlineKeyboard().text("Request Approval 🔑", "request_approval");
+			await ctx.reply(messages.welcome.newUser, { reply_markup: keyboard });
 		} catch (error) {
 			console.error("Error in start command:", error);
-			await ctx.reply("⚠️ An error occurred. Please try again later.");
+			await ctx.reply(messages.errors.generic);
+		}
+	});
+
+	// Manejador para el botón de solicitud
+	bot.callbackQuery("request_approval", async (ctx) => {
+		try {
+			if (!ctx.from) {
+				await ctx.reply(messages.errors.noUser);
+				return;
+			}
+
+			const user = await userService.getUserByTelegramId(ctx.from.id);
+			if (!user) {
+				await ctx.answerCallbackQuery("User not found");
+				return;
+			}
+
+			if (user.approval_requested) {
+				await ctx.answerCallbackQuery("Request already sent");
+				return;
+			}
+
+			// Actualizar estado y notificar al admin
+			await userService.requestApproval(ctx.from.id);
+			await ctx.answerCallbackQuery("Request sent successfully!");
+
+			// Actualizar el mensaje con el nuevo estado
+			const keyboard = new InlineKeyboard().text("Request Sent ⌛", "request_approval");
+			await ctx.editMessageReplyMarkup({ reply_markup: keyboard });
+
+			// Notificar a los admins
+			await userService.notifyAdmins(
+				ctx.api,
+				messages.admin.newRequest(user.username, user.telegram_id),
+				user.telegram_id
+			);
+		} catch (error) {
+			console.error("Error in request approval:", error);
+			await ctx.answerCallbackQuery("Error processing request");
 		}
 	});
 }
