@@ -11,6 +11,7 @@ import { setupHelpCommand } from "./commands/helpCommand";
 import { validateSupabaseConnection } from "./services/supabaseClient";
 import { TranscriptionServiceFactory } from "./services/transcription/TranscriptionServiceFactory";
 import { configService } from "./services/configService";
+import { initConfig } from "./config";
 
 // Create bot instance
 const bot = new Bot(config.botToken);
@@ -118,6 +119,7 @@ bot.on("message:voice", async (ctx) => {
 // Start the bot
 async function startBot() {
 	try {
+		await initConfig(); // Initialize config first
 		// Validate all services
 		try {
 			await validateSupabaseConnection();

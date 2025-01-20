@@ -1,12 +1,13 @@
 import dotenv from "dotenv";
 import path from "path";
 import { configService } from "./services/configService";
+import { TranscriptionConfig } from "../types/types";
 
-// Load environment variables with absolute path
+// Load environment variables
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
-// Export all environment variables
-export const config = {
+// Base config without transcription
+const baseConfig = {
 	botToken: process.env.BOT_TOKEN as string,
 	supabase: {
 		url: process.env.SUPABASE_URL,
@@ -26,8 +27,15 @@ export const config = {
 	admin: {
 		telegramId: process.env.ADMIN_TELEGRAM_ID as string,
 	},
-	transcription: await configService.getTranscriptionConfig(),
+	transcription: {} as TranscriptionConfig,
 };
+
+export const config = baseConfig;
+
+// Initialize transcription config
+export async function initConfig() {
+	config.transcription = await configService.getTranscriptionConfig();
+}
 
 // Validate only critical environment variables
 if (!config.botToken) {

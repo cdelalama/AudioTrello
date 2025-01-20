@@ -12,6 +12,7 @@ const helpCommand_1 = require("./commands/helpCommand");
 const supabaseClient_1 = require("./services/supabaseClient");
 const TranscriptionServiceFactory_1 = require("./services/transcription/TranscriptionServiceFactory");
 const configService_1 = require("./services/configService");
+const config_2 = require("./config");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -106,6 +107,7 @@ bot.on("message:voice", async (ctx) => {
 // Start the bot
 async function startBot() {
     try {
+        await (0, config_2.initConfig)(); // Initialize config first
         // Validate all services
         try {
             await (0, supabaseClient_1.validateSupabaseConnection)();

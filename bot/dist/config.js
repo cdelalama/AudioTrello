@@ -4,13 +4,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.config = void 0;
+exports.initConfig = initConfig;
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
 const configService_1 = require("./services/configService");
-// Load environment variables with absolute path
+// Load environment variables
 dotenv_1.default.config({ path: path_1.default.join(__dirname, "../.env") });
-// Export all environment variables
-exports.config = {
+// Base config without transcription
+const baseConfig = {
     botToken: process.env.BOT_TOKEN,
     supabase: {
         url: process.env.SUPABASE_URL,
@@ -28,8 +29,13 @@ exports.config = {
     admin: {
         telegramId: process.env.ADMIN_TELEGRAM_ID,
     },
-    transcription: await configService_1.configService.getTranscriptionConfig(),
+    transcription: {},
 };
+exports.config = baseConfig;
+// Initialize transcription config
+async function initConfig() {
+    exports.config.transcription = await configService_1.configService.getTranscriptionConfig();
+}
 // Validate only critical environment variables
 if (!exports.config.botToken) {
     throw new Error("BOT_TOKEN must be defined in environment variables!");
