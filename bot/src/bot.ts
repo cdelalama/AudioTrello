@@ -8,6 +8,9 @@ import { setupStartCommand } from "./commands/startCommand";
 import { setupAdminCommands } from "./commands/adminCommands";
 import { showWelcomeBanner } from "./utils/console";
 import { setupHelpCommand } from "./commands/helpCommand";
+import { validateSupabaseConnection } from "./services/supabaseClient";
+import { TranscriptionServiceFactory } from "./services/transcription/TranscriptionServiceFactory";
+import { configService } from "./services/configService";
 
 // Create bot instance
 const bot = new Bot(config.botToken);
@@ -53,33 +56,79 @@ setupStartCommand(bot);
 setupAdminCommands(bot);
 setupHelpCommand(bot);
 
-// Manejador para mensajes de audio
-bot.on("message:audio", async (ctx) => {
+// Función helper para procesar audio
+async function processAudio(ctx: any, audioData: any) {
+	await ctx.reply("🔍 Processing your audio...");
+
 	try {
-		const audio = ctx.message.audio;
-		const user = ctx.from;
+		const file = await ctx.getFile();
+		const fileUrl = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
+		const response = await fetch(fileUrl);
+		const buffer = await response.arrayBuffer();
+		const audioBuffer = Buffer.from(buffer);
 
-		// Procesar audio
-		await ctx.reply("🔍 Processing your audio...");
-		const transcription = await transcribeAudio(audio);
+		// Intentar con el servicio primario
+		const primaryServiceName = await configService.getPrimaryService();
+		const primaryService = TranscriptionServiceFactory.getService(primaryServiceName);
+		try {
+			const transcription = await primaryService.transcribe(audioBuffer);
+			await ctx.reply(`📝 ${primaryServiceName} Transcription:\n${transcription}`);
+			return;
+		} catch (error) {
+			console.log(`${primaryServiceName} transcription failed, trying fallback...`);
 
-		// Clasificar tarea (implementar luego)
-		await ctx.reply(`📝 Transcription: ${transcription}`);
+			const fallbackServices = await configService.getFallbackServices();
+			if (!fallbackServices.length) {
+				throw error;
+			}
+
+			// Intentar con el primer fallback disponible
+			const fallbackService = TranscriptionServiceFactory.getService(fallbackServices[0]);
+			const transcription = await fallbackService.transcribe(audioBuffer);
+			await ctx.reply(
+				`🔊 ${fallbackServices[0]} Transcription (fallback):\n${transcription}`
+			);
+		}
 	} catch (error) {
 		console.error("Error processing audio:", error);
 		await ctx.reply("⚠️ Error processing audio. Please try again.");
 	}
+}
+
+// Manejador para archivos de audio
+bot.on("message:audio", async (ctx) => {
+	try {
+		await processAudio(ctx, ctx.message.audio);
+	} catch (error) {
+		console.error("Error processing audio file:", error);
+		await ctx.reply("⚠️ Error processing audio. Please try again.");
+	}
 });
 
-// Función temporal de transcripción (implementar con OpenAI luego)
-async function transcribeAudio(audio: Audio): Promise<string> {
-	// Placeholder - implementar lógica real
-	return "Sample transcription text";
-}
+// Manejador para mensajes de voz
+bot.on("message:voice", async (ctx) => {
+	try {
+		await processAudio(ctx, ctx.message.voice);
+	} catch (error) {
+		console.error("Error processing voice message:", error);
+		await ctx.reply("⚠️ Error processing voice message. Please try again.");
+	}
+});
 
 // Start the bot
 async function startBot() {
 	try {
+		// Validate all services
+		try {
+			await validateSupabaseConnection();
+		} catch (error) {
+			console.error("Supabase validation failed:", error);
+			process.exit(1); // Solo Supabase es crítico
+		}
+
+		// Validar servicios opcionales
+		await TranscriptionServiceFactory.validateServices();
+
 		// Create initial admin user if needed
 		await userService.createInitialAdmin();
 

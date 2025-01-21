@@ -9,6 +9,9 @@ const startCommand_1 = require("./commands/startCommand");
 const adminCommands_1 = require("./commands/adminCommands");
 const console_1 = require("./utils/console");
 const helpCommand_1 = require("./commands/helpCommand");
+const supabaseClient_1 = require("./services/supabaseClient");
+const TranscriptionServiceFactory_1 = require("./services/transcription/TranscriptionServiceFactory");
+const configService_1 = require("./services/configService");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -46,30 +49,73 @@ bot.use(async (ctx, next) => {
 (0, startCommand_1.setupStartCommand)(bot);
 (0, adminCommands_1.setupAdminCommands)(bot);
 (0, helpCommand_1.setupHelpCommand)(bot);
-// Manejador para mensajes de audio
-bot.on("message:audio", async (ctx) => {
+// Función helper para procesar audio
+async function processAudio(ctx, audioData) {
+    await ctx.reply("🔍 Processing your audio...");
     try {
-        const audio = ctx.message.audio;
-        const user = ctx.from;
-        // Procesar audio
-        await ctx.reply("🔍 Processing your audio...");
-        const transcription = await transcribeAudio(audio);
-        // Clasificar tarea (implementar luego)
-        await ctx.reply(`📝 Transcription: ${transcription}`);
+        const file = await ctx.getFile();
+        const fileUrl = `https://api.telegram.org/file/bot${config_1.config.botToken}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        const buffer = await response.arrayBuffer();
+        const audioBuffer = Buffer.from(buffer);
+        // Intentar con el servicio primario
+        const primaryServiceName = await configService_1.configService.getPrimaryService();
+        const primaryService = TranscriptionServiceFactory_1.TranscriptionServiceFactory.getService(primaryServiceName);
+        try {
+            const transcription = await primaryService.transcribe(audioBuffer);
+            await ctx.reply(`📝 ${primaryServiceName} Transcription:\n${transcription}`);
+            return;
+        }
+        catch (error) {
+            console.log(`${primaryServiceName} transcription failed, trying fallback...`);
+            const fallbackServices = await configService_1.configService.getFallbackServices();
+            if (!fallbackServices.length) {
+                throw error;
+            }
+            // Intentar con el primer fallback disponible
+            const fallbackService = TranscriptionServiceFactory_1.TranscriptionServiceFactory.getService(fallbackServices[0]);
+            const transcription = await fallbackService.transcribe(audioBuffer);
+            await ctx.reply(`🔊 ${fallbackServices[0]} Transcription (fallback):\n${transcription}`);
+        }
     }
     catch (error) {
         console.error("Error processing audio:", error);
         await ctx.reply("⚠️ Error processing audio. Please try again.");
     }
-});
-// Función temporal de transcripción (implementar con OpenAI luego)
-async function transcribeAudio(audio) {
-    // Placeholder - implementar lógica real
-    return "Sample transcription text";
 }
+// Manejador para archivos de audio
+bot.on("message:audio", async (ctx) => {
+    try {
+        await processAudio(ctx, ctx.message.audio);
+    }
+    catch (error) {
+        console.error("Error processing audio file:", error);
+        await ctx.reply("⚠️ Error processing audio. Please try again.");
+    }
+});
+// Manejador para mensajes de voz
+bot.on("message:voice", async (ctx) => {
+    try {
+        await processAudio(ctx, ctx.message.voice);
+    }
+    catch (error) {
+        console.error("Error processing voice message:", error);
+        await ctx.reply("⚠️ Error processing voice message. Please try again.");
+    }
+});
 // Start the bot
 async function startBot() {
     try {
+        // Validate all services
+        try {
+            await (0, supabaseClient_1.validateSupabaseConnection)();
+        }
+        catch (error) {
+            console.error("Supabase validation failed:", error);
+            process.exit(1); // Solo Supabase es crítico
+        }
+        // Validar servicios opcionales
+        await TranscriptionServiceFactory_1.TranscriptionServiceFactory.validateServices();
         // Create initial admin user if needed
         await userService_1.userService.createInitialAdmin();
         (0, console_1.showWelcomeBanner)();

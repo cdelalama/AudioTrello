@@ -1,0 +1,6 @@
+# Environment
+.env
+
+# Credentials
+credentials/
+gen-lang-client-*.json

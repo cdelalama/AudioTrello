@@ -11,6 +11,27 @@ export interface Database {
 				Insert: Omit<Task, "id" | "created_at">;
 				Update: Partial<Omit<Task, "id" | "created_at">>;
 			};
+			config: {
+				Row: {
+					id: number;
+					key: string;
+					value: TranscriptionConfig | JsonValue;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id?: number;
+					key: string;
+					value: TranscriptionConfig | JsonValue;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					key?: string;
+					value?: TranscriptionConfig | JsonValue;
+					updated_at?: string;
+				};
+			};
 		};
 	};
 }
@@ -46,6 +67,19 @@ declare global {
 		audio_url: string | null;
 		transcription: string;
 	}
+}
+
+export type TranscriptionServiceName = "whisper" | "google";
+
+export interface TranscriptionServiceConfig {
+	name: TranscriptionServiceName;
+	enabled: boolean;
+	order: number;
+}
+
+export interface TranscriptionConfig {
+	services: TranscriptionServiceConfig[];
+	fallbackEnabled: boolean;
 }
 
 export {};

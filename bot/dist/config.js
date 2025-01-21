@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.config = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const configService_1 = require("./services/configService");
 // Load environment variables with absolute path
 dotenv_1.default.config({ path: path_1.default.join(__dirname, "../.env") });
 // Export all environment variables
@@ -15,14 +16,25 @@ exports.config = {
         url: process.env.SUPABASE_URL,
         anonKey: process.env.SUPABASE_ANON_KEY,
     },
+    openai: {
+        apiKey: process.env.OPENAI_API_KEY,
+        available: Boolean(process.env.OPENAI_API_KEY),
+    },
+    google: {
+        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        projectId: process.env.GOOGLE_PROJECT_ID,
+        available: Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.GOOGLE_PROJECT_ID),
+    },
     admin: {
         telegramId: process.env.ADMIN_TELEGRAM_ID,
     },
+    transcription: await configService_1.configService.getTranscriptionConfig(),
 };
-// Validate required environment variables
+// Validate only critical environment variables
 if (!exports.config.botToken) {
     throw new Error("BOT_TOKEN must be defined in environment variables!");
 }
-if (!exports.config.supabase.url || !exports.config.supabase.anonKey) {
-    throw new Error("Supabase credentials not found in environment variables");
-}
+// Log available services
+console.log("Available services:");
+console.log("- OpenAI Whisper:", exports.config.openai.available ? "✅" : "❌");
+console.log("- Google Speech:", exports.config.google.available ? "✅" : "❌");
