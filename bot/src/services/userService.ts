@@ -83,4 +83,63 @@ export const userService = {
 		}
 		return false;
 	},
+
+	// Verificar si un usuario está baneado
+	async isBanned(telegramId: number): Promise<boolean> {
+		const { data } = await supabase
+			.from("users")
+			.select("is_active")
+			.eq("telegram_id", telegramId)
+			.single();
+
+		return data ? !data.is_active : false;
+	},
+
+	// Obtener todos los admins
+	async getAllAdmins(): Promise<User[]> {
+		const { data } = await supabase
+			.from("users")
+			.select("*")
+			.eq("is_admin", true)
+			.eq("is_active", true);
+
+		return data || [];
+	},
+
+	// Notificar a todos los admins
+	async notifyAdmins(bot: any, message: string): Promise<void> {
+		const admins = await this.getAllAdmins();
+		for (const admin of admins) {
+			try {
+				await bot.api.sendMessage(admin.telegram_id, message);
+			} catch (error) {
+				console.error(`Error notifying admin ${admin.telegram_id}:`, error);
+			}
+		}
+	},
+
+	// Banear/Desbanear usuario (solo admins)
+	async toggleBan(telegramId: number): Promise<boolean> {
+		const user = await this.getUserByTelegramId(telegramId);
+		if (!user) return false;
+
+		const { error } = await supabase
+			.from("users")
+			.update({ is_active: !user.is_active })
+			.eq("telegram_id", telegramId);
+
+		return !error;
+	},
+
+	// Obtener usuarios pendientes de aprobación
+	async getPendingUsers(): Promise<User[]> {
+		const { data } = await supabase
+			.from("users")
+			.select("*")
+			.eq("is_active", true)
+			.eq("is_approved", false)
+			.order("created_at", { ascending: false });
+
+		return data || [];
+	},
 };

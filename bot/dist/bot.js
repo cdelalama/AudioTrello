@@ -4,87 +4,51 @@ const grammy_1 = require("grammy");
 const files_1 = require("@grammyjs/files");
 const userService_1 = require("./services/userService");
 const config_1 = require("./config");
+const messages_1 = require("./messages");
+const start_1 = require("./commands/start");
+const admin_1 = require("./commands/admin");
+const console_1 = require("./utils/console");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
-// Start command handler
-bot.command("start", async (ctx) => {
+// Middleware para verificar usuario
+bot.use(async (ctx, next) => {
+    // Skip middleware for /start command
+    if (ctx.message?.text === "/start") {
+        await next();
+        return;
+    }
     try {
-        const user = ctx.from;
-        if (!user) {
-            await ctx.reply("❌ Error: Could not get user information");
+        if (!ctx.from) {
+            await ctx.reply(messages_1.messages.errors.noUser);
             return;
         }
-        // Check if user exists
-        const existingUser = await userService_1.userService.getUserByTelegramId(user.id);
-        if (!existingUser) {
-            // Try to register as admin first
-            const registeredAsAdmin = await userService_1.userService.registerInitialAdmin(user.id, user.username || user.first_name);
-            if (registeredAsAdmin) {
-                await ctx.reply("👋 Welcome! You have been registered as the admin user.");
-                return;
-            }
-            // If not admin, register as normal user
-            const registered = await userService_1.userService.registerUser(user.id, user.username || user.first_name);
-            if (registered) {
-                await ctx.reply("👋 Welcome! Your registration is pending approval by an admin.");
-            }
-            else {
-                await ctx.reply("❌ Error registering user. Please try again later.");
-            }
+        // Verificar si está baneado
+        if (await userService_1.userService.isBanned(ctx.from.id)) {
+            await ctx.reply(messages_1.messages.errors.banned);
+            return;
         }
-        else if (!existingUser.is_approved) {
-            await ctx.reply("⏳ Your registration is still pending approval.");
+        const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+        // Si el usuario no existe o no está aprobado
+        if (!user || !user.is_approved) {
+            await ctx.reply(messages_1.messages.errors.notAuthorized);
+            return;
         }
-        else {
-            await ctx.reply("✅ Welcome back! You're already registered and approved.");
-        }
+        await next();
     }
     catch (error) {
-        console.error("Error in start command:", error);
-        await ctx.reply("⚠️ An error occurred. Please try again later.");
+        console.error("Error checking user authorization:", error);
+        await ctx.reply("⚠️ An error occurred while checking your authorization.");
     }
 });
-// Approve command (admin only)
-bot.command("approve", async (ctx) => {
-    try {
-        const admin = await userService_1.userService.getUserByTelegramId(ctx.from?.id || 0);
-        if (!admin?.is_admin) {
-            await ctx.reply("❌ Only admins can approve users");
-            return;
-        }
-        if (!ctx.message) {
-            await ctx.reply("❌ Invalid command format");
-            return;
-        }
-        const userId = ctx.message.text.split(" ")[1];
-        if (!userId) {
-            await ctx.reply("❌ Please provide a Telegram ID to approve");
-            return;
-        }
-        const approved = await userService_1.userService.approveUser(Number(userId));
-        if (approved) {
-            await ctx.reply("✅ User approved successfully");
-        }
-        else {
-            await ctx.reply("❌ Error approving user");
-        }
-    }
-    catch (error) {
-        console.error("Error in approve command:", error);
-        await ctx.reply("⚠️ An error occurred while approving user");
-    }
-});
+// Setup commands
+(0, start_1.setupStartCommand)(bot);
+(0, admin_1.setupAdminCommands)(bot);
 // Manejador para mensajes de audio
 bot.on("message:audio", async (ctx) => {
     try {
         const audio = ctx.message.audio;
         const user = ctx.from;
-        // Verificar usuario registrado (implementar luego)
-        if (!(await isValidUser(user.id))) {
-            await ctx.reply("❌ Please register first using /start");
-            return;
-        }
         // Procesar audio
         await ctx.reply("🔍 Processing your audio...");
         const transcription = await transcribeAudio(audio);
@@ -101,25 +65,12 @@ async function transcribeAudio(audio) {
     // Placeholder - implementar lógica real
     return "Sample transcription text";
 }
-// Función temporal de validación de usuario
-async function isValidUser(userId) {
-    // Placeholder - integrar con Supabase luego
-    return true;
-}
 // Start the bot
 async function startBot() {
     try {
         // Create initial admin user if needed
         await userService_1.userService.createInitialAdmin();
-        console.log(`
-╔═══════════════════════════════════════╗
-║           AUDIO TRELLO BOT            ║
-║      Voice Tasks Classification       ║
-╠═══════════════════════════════════════╣
-║  🎤 Voice to Text                     ║
-║  📋 Task Classification               ║
-║  📌 Trello Integration               ║
-╚═══════════════════════════════════════╝`);
+        (0, console_1.showWelcomeBanner)();
         bot.start();
         console.log("Bot started successfully! 🚀");
     }
