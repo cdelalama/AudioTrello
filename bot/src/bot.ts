@@ -7,6 +7,7 @@ import { messages } from "./messages";
 import { setupStartCommand } from "./commands/startCommand";
 import { setupAdminCommands } from "./commands/adminCommands";
 import { showWelcomeBanner } from "./utils/console";
+import { setupHelpCommand } from "./commands/helpCommand";
 
 // Create bot instance
 const bot = new Bot(config.botToken);
@@ -50,6 +51,7 @@ bot.use(async (ctx, next) => {
 // Setup commands
 setupStartCommand(bot);
 setupAdminCommands(bot);
+setupHelpCommand(bot);
 
 // Manejador para mensajes de audio
 bot.on("message:audio", async (ctx) => {

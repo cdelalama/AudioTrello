@@ -8,6 +8,7 @@ const messages_1 = require("./messages");
 const startCommand_1 = require("./commands/startCommand");
 const adminCommands_1 = require("./commands/adminCommands");
 const console_1 = require("./utils/console");
+const helpCommand_1 = require("./commands/helpCommand");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -44,6 +45,7 @@ bot.use(async (ctx, next) => {
 // Setup commands
 (0, startCommand_1.setupStartCommand)(bot);
 (0, adminCommands_1.setupAdminCommands)(bot);
+(0, helpCommand_1.setupHelpCommand)(bot);
 // Manejador para mensajes de audio
 bot.on("message:audio", async (ctx) => {
     try {

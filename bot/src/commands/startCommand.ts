@@ -1,6 +1,7 @@
 import { Bot, Keyboard } from "grammy";
 import { userService } from "../services/userService";
 import { messages } from "../messages";
+import { helpMessages } from "../messages/helpMessages";
 
 export function setupStartCommand(bot: Bot) {
 	bot.command("start", async (ctx) => {
@@ -29,6 +30,9 @@ export function setupStartCommand(bot: Bot) {
 
 				if (registeredAsAdmin) {
 					await ctx.reply(messages.welcome.adminCreated);
+					await ctx.reply(helpMessages.start + "\n\n" + helpMessages.admin, {
+						parse_mode: "Markdown",
+					});
 					return;
 				}
 
@@ -41,6 +45,7 @@ export function setupStartCommand(bot: Bot) {
 				if (registered) {
 					const keyboard = new Keyboard().text(messages.welcome.requestButton).resized();
 					await ctx.reply(messages.welcome.newUser, { reply_markup: keyboard });
+					await ctx.reply(helpMessages.start, { parse_mode: "Markdown" });
 
 					// Notify admins
 					await userService.notifyAdmins(
@@ -54,6 +59,12 @@ export function setupStartCommand(bot: Bot) {
 				await ctx.reply(messages.welcome.alreadyRequested);
 			} else {
 				await ctx.reply(messages.welcome.approved);
+				await ctx.reply(
+					helpMessages.start + (existingUser.is_admin ? "\n\n" + helpMessages.admin : ""),
+					{
+						parse_mode: "Markdown",
+					}
+				);
 			}
 		} catch (error) {
 			console.error("Error in start command:", error);

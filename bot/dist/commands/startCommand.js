@@ -4,6 +4,7 @@ exports.setupStartCommand = setupStartCommand;
 const grammy_1 = require("grammy");
 const userService_1 = require("../services/userService");
 const messages_1 = require("../messages");
+const helpMessages_1 = require("../messages/helpMessages");
 function setupStartCommand(bot) {
     bot.command("start", async (ctx) => {
         try {
@@ -24,6 +25,9 @@ function setupStartCommand(bot) {
                 const registeredAsAdmin = await userService_1.userService.registerInitialAdmin(user.id, user.username || user.first_name);
                 if (registeredAsAdmin) {
                     await ctx.reply(messages_1.messages.welcome.adminCreated);
+                    await ctx.reply(helpMessages_1.helpMessages.start + "\n\n" + helpMessages_1.helpMessages.admin, {
+                        parse_mode: "Markdown",
+                    });
                     return;
                 }
                 // If not admin, register as normal user
@@ -31,6 +35,7 @@ function setupStartCommand(bot) {
                 if (registered) {
                     const keyboard = new grammy_1.Keyboard().text(messages_1.messages.welcome.requestButton).resized();
                     await ctx.reply(messages_1.messages.welcome.newUser, { reply_markup: keyboard });
+                    await ctx.reply(helpMessages_1.helpMessages.start, { parse_mode: "Markdown" });
                     // Notify admins
                     await userService_1.userService.notifyAdmins(bot, messages_1.messages.admin.newRequest(user.username || user.first_name, user.id));
                 }
@@ -43,6 +48,9 @@ function setupStartCommand(bot) {
             }
             else {
                 await ctx.reply(messages_1.messages.welcome.approved);
+                await ctx.reply(helpMessages_1.helpMessages.start + (existingUser.is_admin ? "\n\n" + helpMessages_1.helpMessages.admin : ""), {
+                    parse_mode: "Markdown",
+                });
             }
         }
         catch (error) {
