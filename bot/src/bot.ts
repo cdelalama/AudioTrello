@@ -4,8 +4,8 @@ import { Audio } from "grammy/types";
 import { userService } from "./services/userService";
 import { config } from "./config";
 import { messages } from "./messages";
-import { setupStartCommand } from "./commands/start";
-import { setupAdminCommands } from "./commands/admin";
+import { setupStartCommand } from "./commands/startCommand";
+import { setupAdminCommands } from "./commands/adminCommands";
 import { showWelcomeBanner } from "./utils/console";
 
 // Create bot instance
