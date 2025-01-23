@@ -1,3 +1,20 @@
+export interface Database {
+	public: {
+		Tables: {
+			users: {
+				Row: User; // Return type when querying
+				Insert: Omit<User, "id" | "created_at">; // Insert type
+				Update: Partial<Omit<User, "id" | "created_at">>; // Update type
+			};
+			tasks: {
+				Row: Task;
+				Insert: Omit<Task, "id" | "created_at">;
+				Update: Partial<Omit<Task, "id" | "created_at">>;
+			};
+		};
+	};
+}
+
 declare global {
 	// User table
 	interface User {

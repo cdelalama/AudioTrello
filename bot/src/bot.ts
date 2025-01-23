@@ -1,27 +1,87 @@
 import { Bot } from "grammy";
-import dotenv from "dotenv";
-import path from "path";
 import { hydrateFiles } from "@grammyjs/files";
 import { Audio } from "grammy/types";
-
-// Load environment variables with absolute path
-dotenv.config({ path: path.join(__dirname, "../../bot/.env") });
-
-// Verify BOT_TOKEN exists
-if (!process.env.BOT_TOKEN) {
-	throw new Error("BOT_TOKEN must be defined in environment variables!");
-}
+import { userService } from "./services/userService";
+import { config } from "./config";
 
 // Create bot instance
-const bot = new Bot(process.env.BOT_TOKEN);
+const bot = new Bot(config.botToken);
 bot.api.config.use(hydrateFiles(bot.token));
 
 // Start command handler
 bot.command("start", async (ctx) => {
 	try {
-		await ctx.reply("Hello! Bot started successfully.");
+		const user = ctx.from;
+		if (!user) {
+			await ctx.reply("❌ Error: Could not get user information");
+			return;
+		}
+
+		// Check if user exists
+		const existingUser = await userService.getUserByTelegramId(user.id);
+
+		if (!existingUser) {
+			// Try to register as admin first
+			const registeredAsAdmin = await userService.registerInitialAdmin(
+				user.id,
+				user.username || user.first_name
+			);
+
+			if (registeredAsAdmin) {
+				await ctx.reply("👋 Welcome! You have been registered as the admin user.");
+				return;
+			}
+
+			// If not admin, register as normal user
+			const registered = await userService.registerUser(
+				user.id,
+				user.username || user.first_name
+			);
+			if (registered) {
+				await ctx.reply("👋 Welcome! Your registration is pending approval by an admin.");
+			} else {
+				await ctx.reply("❌ Error registering user. Please try again later.");
+			}
+		} else if (!existingUser.is_approved) {
+			await ctx.reply("⏳ Your registration is still pending approval.");
+		} else {
+			await ctx.reply("✅ Welcome back! You're already registered and approved.");
+		}
 	} catch (error) {
 		console.error("Error in start command:", error);
+		await ctx.reply("⚠️ An error occurred. Please try again later.");
+	}
+});
+
+// Approve command (admin only)
+bot.command("approve", async (ctx) => {
+	try {
+		const admin = await userService.getUserByTelegramId(ctx.from?.id || 0);
+		if (!admin?.is_admin) {
+			await ctx.reply("❌ Only admins can approve users");
+			return;
+		}
+
+		if (!ctx.message) {
+			await ctx.reply("❌ Invalid command format");
+			return;
+		}
+
+		const userId = ctx.message.text.split(" ")[1];
+		if (!userId) {
+			await ctx.reply("❌ Please provide a Telegram ID to approve");
+			return;
+		}
+
+		const approved = await userService.approveUser(Number(userId));
+		if (approved) {
+			await ctx.reply("✅ User approved successfully");
+		} else {
+			await ctx.reply("❌ Error approving user");
+		}
+	} catch (error) {
+		console.error("Error in approve command:", error);
+		await ctx.reply("⚠️ An error occurred while approving user");
 	}
 });
 
@@ -62,18 +122,25 @@ async function isValidUser(userId: number): Promise<boolean> {
 }
 
 // Start the bot
-try {
-	console.log(`
+async function startBot() {
+	try {
+		// Create initial admin user if needed
+		await userService.createInitialAdmin();
+
+		console.log(`
 ╔═══════════════════════════════════════╗
 ║           AUDIO TRELLO BOT            ║
 ║      Voice Tasks Classification       ║
 ╠═══════════════════════════════════════╣
 ║  🎤 Voice to Text                     ║
 ║  📋 Task Classification               ║
-║  �� Trello Integration                ║
+║  📌 Trello Integration               ║
 ╚═══════════════════════════════════════╝`);
-	bot.start();
-	console.log("Bot started successfully! 🚀");
-} catch (error) {
-	console.error("Error starting the bot:", error);
+		bot.start();
+		console.log("Bot started successfully! 🚀");
+	} catch (error) {
+		console.error("Error starting the bot:", error);
+	}
 }
+
+startBot();
