@@ -6,28 +6,28 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const grammy_1 = require("grammy");
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
-// Cargar variables de entorno con ruta absoluta
-dotenv_1.default.config({ path: path_1.default.join(__dirname, '../../bot/.env') });
-// Verificar que existe BOT_TOKEN
+// Load environment variables with absolute path
+dotenv_1.default.config({ path: path_1.default.join(__dirname, "../../bot/.env") });
+// Verify BOT_TOKEN exists
 if (!process.env.BOT_TOKEN) {
-    throw new Error('BOT_TOKEN debe estar definido en las variables de entorno!');
+    throw new Error("BOT_TOKEN must be defined in environment variables!");
 }
-// Crear instancia del bot
+// Create bot instance
 const bot = new grammy_1.Bot(process.env.BOT_TOKEN);
-// Manejador del comando start
+// Start command handler
 bot.command("start", async (ctx) => {
     try {
-        await ctx.reply("¡Hola! Bot iniciado correctamente.");
+        await ctx.reply("Hello! Bot started successfully.");
     }
     catch (error) {
-        console.error("Error en el comando start:", error);
+        console.error("Error in start command:", error);
     }
 });
-// Iniciar el bot
+// Start the bot
 try {
     bot.start();
-    console.log("¡Bot iniciado exitosamente!");
+    console.log("Bot started successfully!");
 }
 catch (error) {
-    console.error("Error al iniciar el bot:", error);
+    console.error("Error starting the bot:", error);
 }
