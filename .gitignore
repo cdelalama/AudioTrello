@@ -1,6 +1,6 @@
 *.exe
 *.env
-*.rules
+*.cursorrules
 node_modules/
 bin/
 # Ignore .js files in src folder
