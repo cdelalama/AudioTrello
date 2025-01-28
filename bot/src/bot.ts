@@ -1,6 +1,5 @@
 import { Bot } from "grammy";
 import { hydrateFiles } from "@grammyjs/files";
-import { Audio } from "grammy/types";
 import { userService } from "./services/userService";
 import { config } from "./config";
 import { messages } from "./messages/messages";
@@ -10,7 +9,6 @@ import { showWelcomeBanner } from "./utils/console";
 import { setupHelpCommand } from "./commands/helpCommand";
 import { validateSupabaseConnection } from "./services/supabaseClient";
 import { TranscriptionServiceFactory } from "./services/transcription/TranscriptionServiceFactory";
-import { configService } from "./services/configService";
 import { initConfig } from "./config";
 import { TaskProcessor } from "./services/taskProcessor";
 import { AudioProcessor } from "./services/audioProcessor";
