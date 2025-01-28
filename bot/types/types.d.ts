@@ -41,23 +41,23 @@ export interface Database {
 	};
 }
 
-declare global {
-	// User table
-	interface User {
-		id: number;
-		telegram_id: number;
-		username: string;
-		created_at: string;
-		is_active: boolean;
-		is_admin: boolean; // Para identificar administradores que pueden aprobar usuarios
-		is_approved: boolean; // Para saber si el usuario está aprobado para usar el bot
-		trello_token: string | null; // Token de acceso a Trello
-		trello_username: string | null; // Username de Trello
-		default_board_id: string | null; // ID del tablero por defecto
-		default_list_id: string | null; // ID de la lista por defecto
-		approval_requested: boolean; // Para saber si ya solicitó aprobación
-	}
+export interface User {
+	id: number;
+	telegram_id: number;
+	username: string;
+	created_at: string;
+	is_active: boolean;
+	is_admin: boolean; // Para identificar administradores que pueden aprobar usuarios
+	is_approved: boolean; // Para saber si el usuario está aprobado para usar el bot
+	trello_token: string | null; // Token de acceso a Trello
+	trello_username: string | null; // Username de Trello
+	default_board_id: string | null; // ID del tablero por defecto
+	default_list_id: string | null; // ID de la lista por defecto
+	approval_requested: boolean; // Para saber si ya solicitó aprobación
+	waiting_for_token: boolean;
+}
 
+declare global {
 	// Task table
 	interface Task {
 		id: number;
@@ -105,6 +105,35 @@ export interface PendingTask {
 	user_id: number;
 	created_at: string;
 	expires_at: string;
+}
+
+export interface TrelloConfig {
+	apiKey: string;
+	token: string;
+	defaultBoardId: string;
+	defaultListId: string;
+}
+
+export interface Config {
+	botToken: string;
+	supabase: {
+		url: string;
+		anonKey: string;
+	};
+	openai: {
+		apiKey: string;
+		available: boolean;
+	};
+	google: {
+		credentials: string;
+		projectId: string;
+		available: boolean;
+	};
+	admin: {
+		telegramId: string;
+	};
+	transcription: TranscriptionConfig;
+	trello: TrelloConfig;
 }
 
 export {};

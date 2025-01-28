@@ -154,4 +154,9 @@ exports.userService = {
             return false;
         }
     },
+    async updateUser(userId, updates) {
+        const { error } = await supabaseClient_1.supabase.from("users").update(updates).eq("id", userId);
+        if (error)
+            throw error;
+    },
 };

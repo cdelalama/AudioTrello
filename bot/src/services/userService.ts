@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient";
 import { InlineKeyboard } from "grammy";
+import { User } from "../../types/types";
 
 export const userService = {
 	// Verificar si un usuario existe y está aprobado
@@ -172,5 +173,11 @@ export const userService = {
 			console.error("Error requesting approval:", error);
 			return false;
 		}
+	},
+
+	async updateUser(userId: number, updates: Partial<User>): Promise<void> {
+		const { error } = await supabase.from("users").update(updates).eq("id", userId);
+
+		if (error) throw error;
 	},
 };

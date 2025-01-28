@@ -54,6 +54,7 @@ export function setupStartCommand(bot: Bot) {
 				trello_username: null,
 				default_board_id: null,
 				default_list_id: null,
+				waiting_for_token: false,
 			});
 
 			const keyboard = new InlineKeyboard().text("Request Approval 🔑", "request_approval");

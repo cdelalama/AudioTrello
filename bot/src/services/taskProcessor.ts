@@ -249,4 +249,10 @@ export class TaskProcessor {
 		}
 		return task;
 	}
+
+	static async deletePendingTask(taskId: string): Promise<void> {
+		const { error } = await supabase.from("pending_tasks").delete().eq("id", taskId);
+
+		if (error) throw error;
+	}
 }

@@ -154,6 +154,11 @@ class TaskProcessor {
         }
         return task;
     }
+    static async deletePendingTask(taskId) {
+        const { error } = await supabaseClient_1.supabase.from("pending_tasks").delete().eq("id", taskId);
+        if (error)
+            throw error;
+    }
 }
 exports.TaskProcessor = TaskProcessor;
 // Tiempo de expiración para tareas pendientes (1 hora)

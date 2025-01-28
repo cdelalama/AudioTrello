@@ -14,6 +14,7 @@ import { TaskProcessor } from "./services/taskProcessor";
 import { AudioProcessor } from "./services/audioProcessor";
 import { formatDuration, formatPriority } from "./utils/formatters";
 import { supabase } from "./services/supabaseClient";
+import { TrelloService } from "./services/trelloService";
 
 // Create bot instance
 const bot = new Bot(config.botToken);
@@ -166,22 +167,66 @@ bot.on("message:audio", async (ctx) => {
 
 // Manejador para los botones
 bot.callbackQuery(/create_task:(.+)/, async (ctx) => {
+	try {
+		const user = await userService.getUserByTelegramId(ctx.from.id);
+		if (!user) {
+			await ctx.reply("❌ Usuario no encontrado");
+			return;
+		}
+
+		// Verificar autenticación Trello
+		if (!user.trello_token) {
+			const authUrl = TrelloService.getAuthUrl();
+			await ctx.reply("🔑 Necesitas autenticarte en Trello primero", {
+				reply_markup: {
+					inline_keyboard: [[{ text: "🔗 Autenticar con Trello", url: authUrl }]],
+				},
+			});
+			// Marcar usuario como esperando token
+			await userService.updateUser(user.id, { waiting_for_token: true });
+			return;
+		}
+
+		const taskId = ctx.match[1];
+		const taskData = await TaskProcessor.getPendingTask(taskId, user.id);
+		if (!taskData) {
+			await ctx.reply("❌ La tarea ha expirado. Por favor, crea una nueva.");
+			return;
+		}
+
+		await TrelloService.createCard(taskData, user);
+		await ctx.editMessageText("✅ ¡Tarea creada con éxito en Trello!");
+		await TaskProcessor.deletePendingTask(taskId);
+	} catch (error: any) {
+		if (error.message === "TRELLO_AUTH_REQUIRED") {
+			await ctx.editMessageText(
+				"❌ Error de autenticación con Trello. Por favor, intenta autenticarte nuevamente."
+			);
+		} else {
+			console.error("Error creating Trello task:", error);
+			await ctx.editMessageText(
+				"❌ Error al crear la tarea en Trello. Por favor, intenta nuevamente."
+			);
+		}
+	}
+});
+
+// Manejador para guardar el token de Trello
+bot.on("message:text", async (ctx) => {
 	const user = await userService.getUserByTelegramId(ctx.from.id);
-	if (!user) {
-		await ctx.reply("❌ Usuario no encontrado");
-		return;
+	if (!user?.waiting_for_token) return;
+
+	const token = ctx.message.text.trim();
+	try {
+		await userService.updateUser(user.id, {
+			trello_token: token,
+			waiting_for_token: false,
+		});
+		await ctx.reply("✅ Token de Trello guardado correctamente. Ya puedes crear tareas.");
+	} catch (error: any) {
+		console.error("Error saving Trello token:", error);
+		await ctx.reply("❌ Error al guardar el token. Por favor, intenta nuevamente.");
 	}
-
-	const taskId = ctx.match[1];
-	const taskData = await TaskProcessor.getPendingTask(taskId, user.id);
-
-	if (!taskData) {
-		await ctx.reply("❌ La tarea ha expirado. Por favor, crea una nueva.");
-		return;
-	}
-
-	// Aquí iría la lógica para crear la tarea en Trello
-	await ctx.reply("✅ ¡Tarea creada con éxito!");
 });
 
 bot.callbackQuery("add_more_info", async (ctx) => {
