@@ -15,6 +15,7 @@ import { AudioProcessor } from "./services/audioProcessor";
 import { formatDuration, formatPriority } from "./utils/formatters";
 import { supabase } from "./services/supabaseClient";
 import { TrelloService } from "./services/trelloService";
+import { setupSettingsCommand } from "./commands/settingsCommand";
 
 // Create bot instance
 const bot = new Bot(config.botToken);
@@ -59,6 +60,7 @@ bot.use(async (ctx, next) => {
 setupStartCommand(bot);
 setupAdminCommands(bot);
 setupHelpCommand(bot);
+setupSettingsCommand(bot);
 
 // Manejador para mensajes de voz
 bot.on("message:voice", async (ctx) => {

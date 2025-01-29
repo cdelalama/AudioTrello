@@ -17,6 +17,7 @@ const audioProcessor_1 = require("./services/audioProcessor");
 const formatters_1 = require("./utils/formatters");
 const supabaseClient_2 = require("./services/supabaseClient");
 const trelloService_1 = require("./services/trelloService");
+const settingsCommand_1 = require("./commands/settingsCommand");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -54,6 +55,7 @@ bot.use(async (ctx, next) => {
 (0, startCommand_1.setupStartCommand)(bot);
 (0, adminCommands_1.setupAdminCommands)(bot);
 (0, helpCommand_1.setupHelpCommand)(bot);
+(0, settingsCommand_1.setupSettingsCommand)(bot);
 // Manejador para mensajes de voz
 bot.on("message:voice", async (ctx) => {
     try {

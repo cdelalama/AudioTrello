@@ -54,6 +54,8 @@ export function setupStartCommand(bot: Bot) {
 				trello_username: null,
 				default_board_id: null,
 				default_list_id: null,
+				default_board_name: null,
+				default_list_name: null,
 				waiting_for_token: false,
 			});
 

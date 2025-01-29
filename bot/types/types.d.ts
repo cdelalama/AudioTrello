@@ -53,6 +53,8 @@ export interface User {
 	trello_username: string | null; // Username de Trello
 	default_board_id: string | null; // ID del tablero por defecto
 	default_list_id: string | null; // ID de la lista por defecto
+	default_board_name: string | null; // Añadir este campo
+	default_list_name: string | null; // Añadir este campo
 	approval_requested: boolean; // Para saber si ya solicitó aprobación
 	waiting_for_token: boolean;
 }

@@ -48,6 +48,8 @@ function setupStartCommand(bot) {
                 trello_username: null,
                 default_board_id: null,
                 default_list_id: null,
+                default_board_name: null,
+                default_list_name: null,
                 waiting_for_token: false,
             });
             const keyboard = new grammy_1.InlineKeyboard().text("Request Approval 🔑", "request_approval");

@@ -37,6 +37,32 @@ class TrelloService {
     static getAuthUrl() {
         return `https://trello.com/1/authorize?expiration=never&name=AudioTrello&scope=read,write&response_type=token&key=${this.key}`;
     }
+    static async getBoards(userToken) {
+        const url = `${this.baseUrl}/members/me/boards`;
+        const params = new URLSearchParams({
+            key: this.key,
+            token: userToken,
+            fields: "name,id",
+        });
+        const response = await fetch(`${url}?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`Error getting boards: ${response.statusText}`);
+        }
+        return await response.json();
+    }
+    static async getLists(boardId, userToken) {
+        const url = `${this.baseUrl}/boards/${boardId}/lists`;
+        const params = new URLSearchParams({
+            key: this.key,
+            token: userToken,
+            fields: "name,id",
+        });
+        const response = await fetch(`${url}?${params.toString()}`);
+        if (!response.ok) {
+            throw new Error(`Error getting lists: ${response.statusText}`);
+        }
+        return await response.json();
+    }
 }
 exports.TrelloService = TrelloService;
 TrelloService.baseUrl = "https://api.trello.com/1";
