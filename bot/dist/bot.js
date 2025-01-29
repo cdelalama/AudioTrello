@@ -65,6 +65,12 @@ bot.on("message:voice", async (ctx) => {
             await ctx.reply("❌ Usuario no encontrado");
             return;
         }
+        // Verificar configuración completa
+        if (!user.default_board_id || !user.default_list_id) {
+            await ctx.reply("❌ Necesitas configurar un tablero y una lista por defecto antes de crear tareas.\n" +
+                "Usa el comando /settings para configurarlos.");
+            return;
+        }
         const file = await ctx.getFile();
         const transcription = await audioProcessor_1.AudioProcessor.processAudioFile(file);
         // Verificar si hay una tarea pendiente reciente
