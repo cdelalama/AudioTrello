@@ -30,9 +30,6 @@ const baseConfig = {
 	transcription: {} as TranscriptionConfig,
 	trello: {
 		apiKey: process.env.TRELLO_API_KEY || "",
-		token: process.env.TRELLO_TOKEN || "",
-		defaultBoardId: process.env.TRELLO_DEFAULT_BOARD_ID || "",
-		defaultListId: process.env.TRELLO_DEFAULT_LIST_ID || "",
 	},
 };
 

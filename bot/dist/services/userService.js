@@ -27,14 +27,39 @@ exports.userService = {
     },
     // Obtener usuario por Telegram ID
     async getUserByTelegramId(telegramId) {
-        const { data, error } = await supabaseClient_1.supabase
-            .from("users")
-            .select("*")
-            .eq("telegram_id", telegramId)
-            .single();
-        if (error || !data)
+        try {
+            const { data, error } = await supabaseClient_1.supabase
+                .from("users")
+                .select("*")
+                .eq("telegram_id", telegramId)
+                .single();
+            console.log("Raw user data from DB:", data);
+            if (error) {
+                console.error("Error getting user:", error);
+                return null;
+            }
+            // Verificar consistencia al obtener los datos
+            if (data &&
+                ((data.default_board_id && !data.default_board_name) ||
+                    (!data.default_board_id && data.default_board_name) ||
+                    (data.default_list_id && !data.default_list_name) ||
+                    (!data.default_list_id && data.default_list_name))) {
+                console.error("Inconsistent Trello configuration detected, cleaning...");
+                await this.cleanTrelloConfig(data.id);
+                // Volver a obtener los datos limpios
+                const { data: cleanData } = await supabaseClient_1.supabase
+                    .from("users")
+                    .select("*")
+                    .eq("telegram_id", telegramId)
+                    .single();
+                return cleanData;
+            }
+            return data;
+        }
+        catch (error) {
+            console.error("Error in getUserByTelegramId:", error);
             return null;
-        return data;
+        }
     },
     // Aprobar un usuario (solo admins)
     async approveUser(telegramId) {
@@ -154,9 +179,70 @@ exports.userService = {
             return false;
         }
     },
+    async cleanTrelloConfig(userId) {
+        try {
+            const { error } = await supabaseClient_1.supabase
+                .from("users")
+                .update({
+                default_board_id: null,
+                default_board_name: null,
+                default_list_id: null,
+                default_list_name: null,
+            })
+                .eq("id", userId);
+            if (error) {
+                console.error("Error cleaning Trello config:", error);
+            }
+        }
+        catch (error) {
+            console.error("Error in cleanTrelloConfig:", error);
+        }
+    },
     async updateUser(userId, updates) {
-        const { error } = await supabaseClient_1.supabase.from("users").update(updates).eq("id", userId);
-        if (error)
-            throw error;
+        try {
+            // Aquí está la verificación de inconsistencia
+            if (
+            // Caso 1: Hay board_id pero no hay board_name
+            (updates.default_board_id && !updates.default_board_name) ||
+                // Caso 2: No hay board_id pero hay board_name
+                (!updates.default_board_id && updates.default_board_name) ||
+                // Caso 3: Hay list_id pero no hay list_name
+                (updates.default_list_id && !updates.default_list_name) ||
+                // Caso 4: No hay list_id pero hay list_name
+                (!updates.default_list_id && updates.default_list_name)) {
+                console.error("Inconsistent Trello configuration update attempted");
+                // Si detecta inconsistencia, limpia TODO
+                await this.cleanTrelloConfig(userId);
+                return false;
+            }
+            // Si todo está bien, hace el update
+            const { error } = await supabaseClient_1.supabase.from("users").update(updates).eq("id", userId);
+            return !error;
+        }
+        catch (error) {
+            console.error("Error updating user:", error);
+            return false;
+        }
+    },
+    async disconnectTrello(userId) {
+        try {
+            const { error } = await supabaseClient_1.supabase
+                .from("users")
+                .update({
+                trello_token: null,
+                trello_username: null,
+                default_board_id: null,
+                default_board_name: null,
+                default_list_id: null,
+                default_list_name: null,
+                waiting_for_token: false,
+            })
+                .eq("id", userId);
+            return !error;
+        }
+        catch (error) {
+            console.error("Error disconnecting Trello:", error);
+            return false;
+        }
     },
 };

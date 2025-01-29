@@ -8,7 +8,7 @@ export class TrelloService {
 
 	// Create a card in Trello
 	static async createCard(taskData: TrelloTaskData, user: User): Promise<any> {
-		if (!user.trello_token) {
+		if (!user.trello_token || !user.default_list_id) {
 			throw new Error("TRELLO_AUTH_REQUIRED");
 		}
 
@@ -17,7 +17,7 @@ export class TrelloService {
 			const params = new URLSearchParams({
 				key: this.key,
 				token: user.trello_token,
-				idList: user.default_list_id || config.trello.defaultListId,
+				idList: user.default_list_id,
 				name: taskData.title,
 				desc: taskData.description,
 				pos: "bottom",
@@ -45,38 +45,34 @@ export class TrelloService {
 		return `https://trello.com/1/authorize?expiration=never&name=AudioTrello&scope=read,write&response_type=token&key=${this.key}`;
 	}
 
-	static async getBoards(userToken: string): Promise<Array<{ id: string; name: string }>> {
+	static async getBoards(token: string): Promise<Array<{ id: string; name: string }>> {
 		const url = `${this.baseUrl}/members/me/boards`;
 		const params = new URLSearchParams({
 			key: this.key,
-			token: userToken,
-			fields: "name,id",
+			token: token,
+			fields: "name",
 		});
 
-		const response = await fetch(`${url}?${params.toString()}`);
-		if (!response.ok) {
-			throw new Error(`Error getting boards: ${response.statusText}`);
-		}
+		const response = await fetch(`${url}?${params}`);
+		if (!response.ok) throw new Error("Failed to fetch boards");
 
-		return await response.json();
+		return response.json();
 	}
 
 	static async getLists(
 		boardId: string,
-		userToken: string
+		token: string
 	): Promise<Array<{ id: string; name: string }>> {
 		const url = `${this.baseUrl}/boards/${boardId}/lists`;
 		const params = new URLSearchParams({
 			key: this.key,
-			token: userToken,
-			fields: "name,id",
+			token: token,
+			fields: "name",
 		});
 
-		const response = await fetch(`${url}?${params.toString()}`);
-		if (!response.ok) {
-			throw new Error(`Error getting lists: ${response.statusText}`);
-		}
+		const response = await fetch(`${url}?${params}`);
+		if (!response.ok) throw new Error("Failed to fetch lists");
 
-		return await response.json();
+		return response.json();
 	}
 }

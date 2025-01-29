@@ -8,12 +8,14 @@ This bot allows you to:
 
 *Available commands:*
 /start - Start the bot and register
+/settings - Configure your Trello integration
 /help - Show this help message
 
 *Getting started:*
 1. Register using /start
 2. Wait for admin approval
-3. Start sending voice messages!`,
+3. Configure Trello using /settings
+4. Start sending voice messages!`,
 
 	admin: `👑 *Admin Commands:*
 /pending - View users pending approval

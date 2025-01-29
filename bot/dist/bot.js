@@ -18,6 +18,7 @@ const formatters_1 = require("./utils/formatters");
 const supabaseClient_2 = require("./services/supabaseClient");
 const trelloService_1 = require("./services/trelloService");
 const settingsCommand_1 = require("./commands/settingsCommand");
+const settingsKeyboard_1 = require("./keyboards/settingsKeyboard");
 // Create bot instance
 const bot = new grammy_1.Bot(config_1.config.botToken);
 bot.api.config.use((0, files_1.hydrateFiles)(bot.token));
@@ -185,22 +186,27 @@ bot.callbackQuery(/create_task:(.+)/, async (ctx) => {
         }
     }
 });
-// Manejador para guardar el token de Trello
+// Manejador para cuando el usuario envía el token de Trello
 bot.on("message:text", async (ctx) => {
-    const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
-    if (!user?.waiting_for_token)
-        return;
-    const token = ctx.message.text.trim();
     try {
+        const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
+        if (!user?.waiting_for_token)
+            return;
+        const token = ctx.message.text.trim();
+        // Validar y guardar token...
         await userService_1.userService.updateUser(user.id, {
             trello_token: token,
             waiting_for_token: false,
         });
-        await ctx.reply("✅ Token de Trello guardado correctamente. Ya puedes crear tareas.");
+        // Solo mostrar mensaje de éxito y menú de configuración
+        await ctx.reply("✅ Token de Trello guardado correctamente.\n\n" +
+            "Usa los botones para configurar el tablero y la lista donde se crearán las tareas.", {
+            reply_markup: (0, settingsKeyboard_1.createSettingsKeyboard)({ ...user, trello_token: token }),
+        });
     }
     catch (error) {
         console.error("Error saving Trello token:", error);
-        await ctx.reply("❌ Error al guardar el token. Por favor, intenta nuevamente.");
+        await ctx.reply("❌ Error al guardar el token. Por favor, inténtalo de nuevo.");
     }
 });
 bot.callbackQuery("add_more_info", async (ctx) => {
@@ -228,6 +234,13 @@ bot.callbackQuery("cancel_task", async (ctx) => {
 // Start the bot
 async function startBot() {
     try {
+        // Limpiar comandos anteriores y establecer los nuevos
+        await bot.api.deleteMyCommands();
+        await bot.api.setMyCommands([
+            { command: "start", description: "Iniciar el bot" },
+            { command: "settings", description: "Configurar Trello" },
+            { command: "help", description: "Ver ayuda" },
+        ]);
         await (0, config_2.initConfig)(); // Initialize config first
         // Validate all services
         try {
