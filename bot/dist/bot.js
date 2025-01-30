@@ -81,11 +81,12 @@ bot.on("message:voice", async (ctx) => {
             const updatedTask = await taskProcessor_1.TaskProcessor.appendToExistingTask(recentTask.id, transcription, user.id.toString());
             // Mostrar la tarea actualizada
             await ctx.reply(`📝 *Tarea Actualizada*\n\n` +
-                `*Título:* ${updatedTask.taskData.title}\n` +
-                `*Duración:* ${(0, formatters_1.formatDuration)(updatedTask.taskData.duration)}\n` +
-                `*Prioridad:* ${(0, formatters_1.formatPriority)(updatedTask.taskData.priority)}\n` +
-                `*Fecha:* ${formatDate(updatedTask.taskData.dueDate)}\n\n` +
-                `*Descripción:*\n${updatedTask.taskData.description}\n\n` +
+                `*Título:* ${escapeMarkdown(updatedTask.taskData.title || "")}\n` +
+                `*Duración:* ${escapeMarkdown((0, formatters_1.formatDuration)(updatedTask.taskData.duration))}\n` +
+                `*Prioridad:* ${escapeMarkdown((0, formatters_1.formatPriority)(updatedTask.taskData.priority))}\n` +
+                `*Fecha:* ${escapeMarkdown(formatDate(updatedTask.taskData.dueDate))}\n` +
+                `*Recordatorio:* ${escapeMarkdown(formatReminder(updatedTask.taskData.reminder))}\n\n` +
+                `*Descripción:*\n${escapeMarkdown(updatedTask.taskData.description || "")}\n\n` +
                 `¿Qué quieres hacer?`, {
                 parse_mode: "Markdown",
                 reply_markup: {
@@ -110,11 +111,12 @@ bot.on("message:voice", async (ctx) => {
         const taskId = await taskProcessor_1.TaskProcessor.storePendingTask(result.taskData, user.id);
         // Crear mensaje con botones
         await ctx.reply(`📝 *Nueva Tarea*\n\n` +
-            `*Título:* ${result.taskData.title}\n` +
-            `*Duración:* ${(0, formatters_1.formatDuration)(result.taskData.duration)}\n` +
-            `*Prioridad:* ${(0, formatters_1.formatPriority)(result.taskData.priority)}\n` +
-            `*Fecha:* ${formatDate(result.taskData.dueDate)}\n` +
-            `\n*Descripción:*\n${result.taskData.description}\n\n` +
+            `*Título:* ${escapeMarkdown(result.taskData.title || "")}\n` +
+            `*Duración:* ${escapeMarkdown((0, formatters_1.formatDuration)(result.taskData.duration))}\n` +
+            `*Prioridad:* ${escapeMarkdown((0, formatters_1.formatPriority)(result.taskData.priority))}\n` +
+            `*Fecha:* ${escapeMarkdown(formatDate(result.taskData.dueDate))}\n` +
+            `*Recordatorio:* ${escapeMarkdown(formatReminder(result.taskData.reminder))}\n\n` +
+            `*Descripción:*\n${escapeMarkdown(result.taskData.description || "")}\n\n` +
             `¿Qué quieres hacer?`, {
             parse_mode: "Markdown",
             reply_markup: {
@@ -277,8 +279,33 @@ function formatDate(dateString) {
         month: "numeric",
         year: "numeric",
     });
+    const formattedTime = date.toLocaleTimeString("es-ES", {
+        hour: "2-digit",
+        minute: "2-digit",
+    });
     // Capitalizar primera letra del día
     const capitalizedWeekDay = weekDay.charAt(0).toUpperCase() + weekDay.slice(1);
-    return `${capitalizedWeekDay}, ${formattedDate}`;
+    return `${capitalizedWeekDay}, ${formattedDate} ${formattedTime}`;
+}
+function formatReminder(reminder) {
+    if (!reminder)
+        return "No especificado";
+    const formats = {
+        at_time: "En el momento",
+        "5_minutes_before": "5 minutos antes",
+        "10_minutes_before": "10 minutos antes",
+        "15_minutes_before": "15 minutos antes",
+        "1_hour_before": "1 hora antes",
+        "2_hours_before": "2 horas antes",
+        "1_day_before": "1 día antes",
+        "2_days_before": "2 días antes",
+    };
+    return formats[reminder] || "No especificado";
+}
+function escapeMarkdown(text) {
+    if (!text)
+        return "";
+    // Escapar caracteres especiales de Markdown
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
 }
 startBot();

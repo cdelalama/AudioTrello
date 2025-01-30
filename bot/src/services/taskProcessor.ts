@@ -1,11 +1,167 @@
-import { TrelloTaskData, TaskDuration, TaskPriority } from "../../types/types";
+import { TrelloTaskData, TaskDuration, TaskPriority, TrelloReminderType } from "../../types/types";
 import { OpenAI } from "openai";
 import { config } from "../config";
 import { supabase } from "./supabaseClient";
 
+interface TaskAgent {
+	analyze(text: string): Promise<any>;
+}
+
+class DateAgent implements TaskAgent {
+	async analyze(text: string) {
+		const prompt = `
+			You are a date extraction specialist.
+			Current time: ${new Date().toISOString()}
+			Find and convert dates to ISO format.
+			Example: "el martes" -> "2024-02-04T19:09:00.000Z"
+			Return ONLY the ISO date or null.
+		`;
+		// ... implementación
+	}
+}
+
+class ReminderAgent {
+	private static readonly prompt = `
+		You are a Spanish reminder detection specialist. Your ONLY job is to find reminder requests.
+
+		IMPORTANT: Be flexible with time formats. Look for:
+		- Numbers (2, dos, 2h, 2hrs, etc)
+		- Time units (horas, hrs, h, minutos, min, días, etc)
+		- Common variations and typos
+
+		Input examples:
+		- "quiero sacar a pasear a cooper el domingo y recuérdamelo dos horas antes"
+		- "avísame 2 hrs antes de la tarea"
+		- "recuérdame 2h antes"
+		- "2 horas antes por favor"
+		- "en 2hrs avisame"
+
+		Rules:
+		1. ONLY return one of these exact values:
+		   - "2_hours_before" (for 2-4 hours)
+		   - "1_hour_before" (for 1 hour)
+		   - "15_minutes_before" (for 15-30 minutes)
+		   - "10_minutes_before" (for 5-15 minutes)
+		   - "5_minutes_before" (for < 5 minutes)
+		   - "1_day_before" (for 1 day)
+		   - "2_days_before" (for 2+ days)
+		   - "at_time" (for "en el momento")
+		   - null (if no reminder found)
+
+		2. Map variations:
+		   - "2 hrs/2h/2 horas/dos horas" -> "2_hours_before"
+		   - "1 hr/1h/una hora" -> "1_hour_before"
+		   - "30 min/media hora" -> "15_minutes_before"
+		   - "15 min/quince minutos" -> "15_minutes_before"
+		   - "10 min/diez minutos" -> "10_minutes_before"
+		   - "5 min/cinco minutos" -> "5_minutes_before"
+		   - "1 día/un día" -> "1_day_before"
+		   - "2 días/dos días" -> "2_days_before"
+
+		RESPOND ONLY with the reminder value or null. NO other text.
+	`;
+
+	static async analyze(text: string): Promise<TrelloReminderType> {
+		try {
+			// 1. Preprocesar el texto
+			const normalizedText = this.normalizeText(text);
+
+			// 2. Intentar primero con regex para casos comunes
+			const regexReminder = this.findReminderByRegex(normalizedText);
+			if (regexReminder) {
+				console.log("📢 Reminder found by regex:", regexReminder);
+				return regexReminder;
+			}
+
+			// 3. Si no hay match por regex, usar LLM
+			console.log("🤖 Using LLM for reminder detection...");
+			const llmReminder = await this.findReminderByLLM(normalizedText);
+
+			// 4. Validar el resultado
+			if (!this.isValidReminder(llmReminder)) {
+				console.log("⚠️ Invalid reminder detected:", llmReminder);
+				return null;
+			}
+
+			return llmReminder;
+		} catch (error) {
+			console.error("❌ Error in reminder detection:", error);
+			return null; // Fail gracefully
+		}
+	}
+
+	private static normalizeText(text: string): string {
+		return text.toLowerCase().replace(/hrs?/g, "horas").replace(/mins?/g, "minutos");
+	}
+
+	private static findReminderByRegex(text: string): TrelloReminderType | null {
+		const patterns = [
+			{ regex: /2\s*(?:h|hr|hrs|horas)/, value: "2_hours_before" },
+			{ regex: /1\s*(?:h|hr|hrs|hora)/, value: "1_hour_before" },
+			// ... más patrones
+		];
+
+		for (const pattern of patterns) {
+			if (pattern.regex.test(text)) return pattern.value as TrelloReminderType;
+		}
+		return null;
+	}
+
+	private static isValidReminder(reminder: string | null): boolean {
+		const validReminders = [
+			"2_hours_before",
+			"1_hour_before",
+			"15_minutes_before",
+			"10_minutes_before",
+			"5_minutes_before",
+			"1_day_before",
+			"2_days_before",
+			"at_time",
+			null,
+		];
+		return validReminders.includes(reminder);
+	}
+
+	private static async findReminderByLLM(text: string): Promise<TrelloReminderType> {
+		const openai = new OpenAI({ apiKey: config.openai.apiKey! });
+
+		const completion = await openai.chat.completions.create({
+			model: "gpt-4",
+			messages: [
+				{ role: "system", content: this.prompt },
+				{ role: "user", content: text },
+			],
+			temperature: 0,
+		});
+
+		return (completion.choices[0]?.message?.content?.trim() as TrelloReminderType) || null;
+	}
+}
+
+class TaskDetailsAgent implements TaskAgent {
+	async analyze(text: string) {
+		const prompt = `
+			You are a task details specialist.
+			Extract: title, description, duration, priority
+			Return JSON with these fields only.
+		`;
+		// ... implementación
+	}
+}
+
 export class TaskProcessor {
+	private static readonly currentDate = new Date();
+	private static readonly currentHour = this.currentDate.getHours();
+	private static readonly currentMinutes = this.currentDate.getMinutes();
+
 	// Tiempo de expiración para tareas pendientes (1 hora)
 	private static TASK_EXPIRATION = 60 * 60 * 1000;
+
+	private static readonly agents = {
+		date: new DateAgent(),
+		reminder: new ReminderAgent(),
+		details: new TaskDetailsAgent(),
+	};
 
 	// Método para almacenar una tarea y obtener su ID
 	static async storePendingTask(task: TrelloTaskData, userId: number): Promise<string> {
@@ -56,39 +212,24 @@ export class TaskProcessor {
 
 	private static readonly SYSTEM_PROMPT = `
     You are a task analyzer. You receive transcribed audio messages in Spanish and extract task information.
-    Be practical and use common sense when analyzing tasks.
-
-    Analyze if the audio contains a valid task. A valid task should have:
-    - A clear action or objective (if you can understand what needs to be done, it's clear enough)
-
-    Use common sense for duration based on task complexity:
-    - very_short: Simple tasks that take less than an hour
-    - short: Tasks that typically take a few hours
-    - medium: Tasks that might take several days
-    - long: Complex tasks that take weeks
-
-    Use common sense for priority:
-    - high: Urgent or time-sensitive tasks
-    - medium: Regular, routine tasks
-    - low: Optional or non-urgent tasks
 
     IMPORTANT FOR DATES:
-    - Pay special attention to date mentions like "el sábado", "mañana", "la próxima semana", etc.
-    - Current date is: ${new Date().toISOString()}
-    - Convert relative dates to ISO format:
-      * "mañana" -> next day at 10:00
-      * "el sábado" -> next Saturday at 10:00
-      * "la próxima semana" -> next Monday at 10:00
-    - If no specific time is mentioned, use 10:00 as default time
+    - Current date and time: ${this.currentDate.toISOString()}
+    - ALWAYS use the date mentioned in the message for the task
+    - ALWAYS return dates in ISO format (YYYY-MM-DDTHH:mm:ss.sssZ)
+    - Examples:
+      * "el martes" -> next Tuesday at current time
+      * "mañana" -> tomorrow at current time
+      * "el viernes" -> next Friday at current time
     - If no date is mentioned, set dueDate to null
+    - NEVER modify the date based on reminders (if user says "avísame 2 horas antes", that's for the reminder, not the date)
 
-    If the input is NOT a valid task (unclear objective or just testing), respond with:
-    {
-      "isValidTask": false,
-      "message": "Un mensaje en español explicando por qué no es válido y qué necesita el usuario proporcionar"
-    }
+    IMPORTANT FOR DESCRIPTIONS:
+    - Generate clear and useful descriptions
+    - Include relevant details and context
+    - Add common sense details that would help complete the task
 
-    If it IS a valid task, analyze and respond with:
+    You MUST respond with a valid JSON object in this EXACT format:
     {
       "isValidTask": true,
       "task": {
@@ -96,11 +237,13 @@ export class TaskProcessor {
         "description": "string",
         "duration": "very_short|short|medium|long",
         "priority": "high|medium|low",
-        "assignedTo": "string?",
-        "dueDate": "ISO date string or null"
+        "dueDate": "2025-02-04T19:21:35.330Z" // Example date format
       },
-      "summary": "Un resumen en español de cómo se interpretó la tarea, SIEMPRE mencionar si hay fecha o no"
+      "summary": "string"
     }
+
+    DO NOT include any additional text or explanations outside the JSON object.
+    The response MUST be a valid parseable JSON.
 `;
 
 	private static readonly MERGE_PROMPT = `
@@ -114,19 +257,68 @@ export class TaskProcessor {
         "description": "string",
         "duration": "very_short|short|medium|long",
         "priority": "high|medium|low",
-        "dueDate": "ISO date string or null"
+        "dueDate": "ISO date string or null",
+        "reminder": "one_day|one_hour|none|null"
       },
-      "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date or not"
+      "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date and reminder"
     }
 
-    IMPORTANT:
-    - Preserve existing dueDate if not explicitly changed in the new information
-    - If new date is mentioned, update it
-    - ALWAYS include in the summary if there's a due date or not
-    - Example summaries:
+    IMPORTANT FOR DATES:
+    - Current date and time: ${this.currentDate.toISOString()}
+    - ALWAYS preserve the time component in dates
+    - When updating dates, keep the current time if no new time is specified
+    - Format: Full ISO string (YYYY-MM-DDTHH:mm:ss.sssZ)
+
+    IMPORTANT FOR REMINDERS:
+    - Detect Spanish reminder phrases in the additional information
+    - Common phrases:
+      * "recuérdamelo dos horas antes" -> "2_hours_before"
+      * "avísame una hora antes" -> "1_hour_before"
+      * "recuérdame 5 minutos antes" -> "5_minutes_before"
+      * "avisa dos días antes" -> "2_days_before"
+    - If a new reminder is mentioned, it should override the existing one
+    - If no new reminder is mentioned, keep the existing one
+
+    IMPORTANT FOR DESCRIPTIONS:
+    - NEVER return null or empty descriptions
+    - If updating description, merge existing details with new ones
+    - If no new description details, keep existing one but ensure it's complete
+
+    Example summaries:
       "Se actualizó la descripción. La tarea está programada para mañana a las 10:00"
       "Se actualizó la descripción. La tarea no tiene fecha establecida"
       "Se actualizó la descripción y se cambió la fecha de la tarea para el viernes"
+`;
+
+	private static readonly reminderPrompt = `
+    You are a reminder analyzer. Analyze the Spanish text and extract ONLY reminder information.
+    Return ONE of these specific values or null:
+    * "at_time" -> "en el momento"
+    * "5_minutes_before" -> "5 minutos antes"
+    * "10_minutes_before" -> "10 minutos antes"
+    * "15_minutes_before" -> "15 minutos antes"
+    * "1_hour_before" -> "una hora antes"
+    * "2_hours_before" -> "dos horas antes"
+    * "1_day_before" -> "un día antes"
+    * "2_days_before" -> "dos días antes"
+
+    Common Spanish phrases to detect:
+    * "recuérdamelo/avísame/recuérdame/avisa X antes"
+    * "X horas/minutos/días antes"
+    Where X can be any number or word (uno/una, dos, tres, cuatro...)
+
+    Map to closest available option:
+    * 3-4 horas -> "2_hours_before"
+    * 1-2 horas -> "1_hour_before"
+    * 20-30 minutos -> "15_minutes_before"
+    * 1-2 días -> "1_day_before"
+
+    Examples:
+    "quiero hacer algo el martes y avísame cuatro horas antes" -> "2_hours_before"
+    "recuérdamelo tres horas antes" -> "2_hours_before"
+    "avísame media hora antes" -> "15_minutes_before"
+
+    Respond with ONLY the reminder value or null if no reminder is found.
 `;
 
 	static async processTranscription(
@@ -139,100 +331,49 @@ export class TaskProcessor {
 		message?: string;
 	}> {
 		try {
-			const openai = this.getOpenAIClient();
+			console.log("\n📝 Processing transcription:", transcription);
 
-			// Crear el prompt con la fecha actual
-			const currentDate = new Date();
-			const systemPrompt = `
-				You are a task analyzer. You receive transcribed audio messages in Spanish and extract task information.
-				Be practical and use common sense when analyzing tasks.
+			const taskResult = await this.processMainTask(transcription);
+			console.log("✅ Main task result:", taskResult);
 
-				Analyze if the audio contains a valid task. A valid task should have:
-				- A clear action or objective (if you can understand what needs to be done, it's clear enough)
-
-				Use common sense for duration based on task complexity:
-				- very_short: Simple tasks that take less than an hour
-				- short: Tasks that typically take a few hours
-				- medium: Tasks that might take several days
-				- long: Complex tasks that take weeks
-
-				Use common sense for priority:
-				- high: Urgent or time-sensitive tasks
-				- medium: Regular, routine tasks
-				- low: Optional or non-urgent tasks
-
-				IMPORTANT FOR DATES:
-				- Pay special attention to date mentions like "el sábado", "mañana", "la próxima semana", etc.
-				- Current date is: ${currentDate.toISOString()}
-				- Today is ${currentDate.toLocaleDateString("es-ES", { weekday: "long" })}
-				- Convert relative dates to ISO format:
-				  * "mañana" -> next day at 10:00
-				  * "el sábado" -> next Saturday at 10:00
-				  * "la próxima semana" -> next Monday at 10:00
-				- If no specific time is mentioned, use 10:00 as default time
-				- If no date is mentioned, set dueDate to null
-
-				If it IS a valid task, analyze and respond with:
-				{
-				  "isValidTask": true,
-				  "task": {
-					"title": "string",
-					"description": "string",
-					"duration": "very_short|short|medium|long",
-					"priority": "high|medium|low",
-					"assignedTo": "string?",
-					"dueDate": "ISO date string or null"
-				  },
-				  "summary": "Un resumen en español de cómo se interpretó la tarea, SIEMPRE mencionar si hay fecha o no"
-				}
-			`;
-
-			const completion = await openai.chat.completions.create({
-				model: "gpt-4",
-				messages: [
-					{ role: "system", content: systemPrompt },
-					{ role: "user", content: transcription },
-				],
-			});
-
-			if (!completion.choices?.[0]?.message?.content) {
-				throw new Error("Empty response from OpenAI");
-			}
-
-			const content = completion.choices[0].message.content;
-			let result;
-			try {
-				result = JSON.parse(content);
-			} catch (error) {
-				console.error("Error parsing OpenAI response:", content);
-				throw new Error("Invalid JSON response from OpenAI");
-			}
-
-			if (!result.isValidTask) {
+			if (!taskResult.isValidTask || !taskResult.task) {
 				return {
 					isValidTask: false,
-					message: result.message,
+					message: taskResult.message || "No se pudo procesar la tarea correctamente",
 				};
 			}
 
+			console.log("🕒 Analyzing reminder...");
+			const reminder = await ReminderAgent.analyze(transcription);
+			console.log("✨ Final reminder value:", reminder);
+
 			const taskData: TrelloTaskData = {
-				title: result.task.title,
-				description: result.task.description,
-				duration: result.task.duration || "medium",
-				priority: result.task.priority || "medium",
-				assignedTo: result.task.assignedTo || userId,
-				dueDate: result.task.dueDate,
+				title: taskResult.task.title,
+				description: taskResult.task.description,
+				duration: taskResult.task.duration,
+				priority: taskResult.task.priority,
+				dueDate: taskResult.task.dueDate,
+				reminder: reminder,
+				assignedTo: userId,
 			};
 
 			return {
 				isValidTask: true,
 				taskData,
-				summary: result.summary,
+				summary: taskResult.summary,
 			};
 		} catch (error) {
-			console.error("Error processing transcription:", error);
-			throw new Error("Failed to process task transcription");
+			console.error("❌ Error in processTranscription:", error);
+			return {
+				isValidTask: false,
+				message: "Hubo un error procesando la tarea. Por favor, inténtalo de nuevo.",
+			};
 		}
+	}
+
+	private static generateSummary(taskData: TrelloTaskData): string {
+		// Implementa la lógica para generar un resumen a partir de los datos de la tarea
+		return `Resumen de la tarea: ${taskData.title} - ${taskData.description}`;
 	}
 
 	private static getPriorityColor(priority: TaskPriority): string {
@@ -259,21 +400,29 @@ export class TaskProcessor {
 		if (!existingTask) throw new Error("Task not found");
 
 		const openai = this.getOpenAIClient();
-		const currentDate = new Date();
+
 		const mergePrompt = `
 			You are a task merger. You receive the original task and additional information in Spanish.
 			Combine them intelligently into a single coherent task.
 
 			IMPORTANT FOR DATES:
-			- Current date is: ${currentDate.toISOString()}
-			- Today is ${currentDate.toLocaleDateString("es-ES", { weekday: "long" })}
-			- If new date is mentioned in the additional information, UPDATE the dueDate
-			- If no new date is mentioned, keep the existing dueDate
-			- Convert relative dates to ISO format:
-			  * "mañana" -> next day at 10:00
-			  * "el sábado" -> next Saturday at 10:00
-			  * "la próxima semana" -> next Monday at 10:00
-			- If no specific time is mentioned, use 10:00 as default time
+			- Current date is: ${this.currentDate.toISOString()}
+			- Current time is: ${this.currentHour}:${this.currentMinutes}
+			- When updating dates:
+			  * If no specific time is mentioned, use current time
+			  * For future dates without time, use same current time
+
+			IMPORTANT FOR DESCRIPTIONS:
+			- NEVER return null or empty descriptions
+			- If updating description, merge existing details with new ones
+			- If no new description details, keep existing one but ensure it's complete
+
+			IMPORTANT FOR REMINDERS:
+			- Use natural Spanish phrases for reminders
+			- Examples: "Una hora antes", "30 minutos antes", "2 días antes"
+			- If updating reminder, convert to natural format
+			- If no new reminder mentioned, keep existing one
+			- Do NOT use technical formats like "one_hour"
 
 			You MUST respond with a JSON object in this exact format:
 			{
@@ -282,9 +431,10 @@ export class TaskProcessor {
 				"description": "string",
 				"duration": "very_short|short|medium|long",
 				"priority": "high|medium|low",
-				"dueDate": "ISO date string or null"
+				"dueDate": "ISO date string or null",
+				"reminder": "one_day|one_hour|none|null"
 			  },
-			  "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date or not"
+			  "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date and reminder"
 			}
 		`;
 
@@ -352,5 +502,26 @@ export class TaskProcessor {
 		const { error } = await supabase.from("pending_tasks").delete().eq("id", taskId);
 
 		if (error) throw error;
+	}
+
+	private static async processMainTask(transcription: string) {
+		const openai = this.getOpenAIClient();
+
+		const completion = await openai.chat.completions.create({
+			model: "gpt-4",
+			messages: [
+				{ role: "system", content: this.SYSTEM_PROMPT },
+				{ role: "user", content: transcription },
+			],
+		});
+
+		if (!completion.choices?.[0]?.message?.content) {
+			return {
+				isValidTask: false,
+				message: "No se pudo procesar la tarea. Por favor, inténtalo de nuevo.",
+			};
+		}
+
+		return JSON.parse(completion.choices[0].message.content);
 	}
 }

@@ -94,6 +94,17 @@ export interface TranscriptionConfig {
 export type TaskDuration = "very_short" | "short" | "medium" | "long";
 export type TaskPriority = "high" | "medium" | "low";
 
+export type TrelloReminderType =
+	| "at_time"
+	| "5_minutes_before"
+	| "10_minutes_before"
+	| "15_minutes_before"
+	| "1_hour_before"
+	| "2_hours_before"
+	| "1_day_before"
+	| "2_days_before"
+	| null;
+
 export interface TrelloTaskData {
 	title: string;
 	description: string;
@@ -101,6 +112,7 @@ export interface TrelloTaskData {
 	priority: TaskPriority;
 	assignedTo?: string;
 	dueDate: string | null;
+	reminder: TrelloReminderType;
 }
 
 export interface PendingTask {
