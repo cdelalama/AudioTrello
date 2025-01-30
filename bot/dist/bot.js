@@ -83,7 +83,8 @@ bot.on("message:voice", async (ctx) => {
             await ctx.reply(`📝 *Tarea Actualizada*\n\n` +
                 `*Título:* ${updatedTask.taskData.title}\n` +
                 `*Duración:* ${(0, formatters_1.formatDuration)(updatedTask.taskData.duration)}\n` +
-                `*Prioridad:* ${(0, formatters_1.formatPriority)(updatedTask.taskData.priority)}\n\n` +
+                `*Prioridad:* ${(0, formatters_1.formatPriority)(updatedTask.taskData.priority)}\n` +
+                `*Fecha:* ${formatDate(updatedTask.taskData.dueDate)}\n\n` +
                 `*Descripción:*\n${updatedTask.taskData.description}\n\n` +
                 `¿Qué quieres hacer?`, {
                 parse_mode: "Markdown",
@@ -111,8 +112,9 @@ bot.on("message:voice", async (ctx) => {
         await ctx.reply(`📝 *Nueva Tarea*\n\n` +
             `*Título:* ${result.taskData.title}\n` +
             `*Duración:* ${(0, formatters_1.formatDuration)(result.taskData.duration)}\n` +
-            `*Prioridad:* ${(0, formatters_1.formatPriority)(result.taskData.priority)}\n\n` +
-            `*Descripción:*\n${result.taskData.description}\n\n` +
+            `*Prioridad:* ${(0, formatters_1.formatPriority)(result.taskData.priority)}\n` +
+            `*Fecha:* ${formatDate(result.taskData.dueDate)}\n` +
+            `\n*Descripción:*\n${result.taskData.description}\n\n` +
             `¿Qué quieres hacer?`, {
             parse_mode: "Markdown",
             reply_markup: {
@@ -224,6 +226,9 @@ bot.callbackQuery("cancel_task", async (ctx) => {
         if (recentTask) {
             await supabaseClient_2.supabase.from("pending_tasks").delete().eq("id", recentTask.id);
         }
+        // Eliminar el mensaje original con los botones
+        await ctx.deleteMessage();
+        // Enviar mensaje de cancelación como nuevo mensaje
         await ctx.reply("❌ Tarea cancelada.");
     }
     catch (error) {
@@ -261,5 +266,19 @@ async function startBot() {
     catch (error) {
         console.error("Error starting the bot:", error);
     }
+}
+function formatDate(dateString) {
+    if (!dateString)
+        return "No especificada";
+    const date = new Date(dateString);
+    const weekDay = date.toLocaleDateString("es-ES", { weekday: "long" });
+    const formattedDate = date.toLocaleDateString("es-ES", {
+        day: "numeric",
+        month: "numeric",
+        year: "numeric",
+    });
+    // Capitalizar primera letra del día
+    const capitalizedWeekDay = weekDay.charAt(0).toUpperCase() + weekDay.slice(1);
+    return `${capitalizedWeekDay}, ${formattedDate}`;
 }
 startBot();

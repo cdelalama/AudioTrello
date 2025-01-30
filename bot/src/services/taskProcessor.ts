@@ -56,12 +56,33 @@ export class TaskProcessor {
 
 	private static readonly SYSTEM_PROMPT = `
     You are a task analyzer. You receive transcribed audio messages in Spanish and extract task information.
+    Be practical and use common sense when analyzing tasks.
 
     Analyze if the audio contains a valid task. A valid task should have:
-    - A clear action or objective
-    - Enough context to understand what needs to be done
+    - A clear action or objective (if you can understand what needs to be done, it's clear enough)
 
-    If the input is NOT a valid task (too short, unclear, or just testing), respond with:
+    Use common sense for duration based on task complexity:
+    - very_short: Simple tasks that take less than an hour
+    - short: Tasks that typically take a few hours
+    - medium: Tasks that might take several days
+    - long: Complex tasks that take weeks
+
+    Use common sense for priority:
+    - high: Urgent or time-sensitive tasks
+    - medium: Regular, routine tasks
+    - low: Optional or non-urgent tasks
+
+    IMPORTANT FOR DATES:
+    - Pay special attention to date mentions like "el sábado", "mañana", "la próxima semana", etc.
+    - Current date is: ${new Date().toISOString()}
+    - Convert relative dates to ISO format:
+      * "mañana" -> next day at 10:00
+      * "el sábado" -> next Saturday at 10:00
+      * "la próxima semana" -> next Monday at 10:00
+    - If no specific time is mentioned, use 10:00 as default time
+    - If no date is mentioned, set dueDate to null
+
+    If the input is NOT a valid task (unclear objective or just testing), respond with:
     {
       "isValidTask": false,
       "message": "Un mensaje en español explicando por qué no es válido y qué necesita el usuario proporcionar"
@@ -75,11 +96,12 @@ export class TaskProcessor {
         "description": "string",
         "duration": "very_short|short|medium|long",
         "priority": "high|medium|low",
-        "assignedTo": "string?"
+        "assignedTo": "string?",
+        "dueDate": "ISO date string or null"
       },
-      "summary": "Un resumen en español de cómo se interpretó la tarea"
+      "summary": "Un resumen en español de cómo se interpretó la tarea, SIEMPRE mencionar si hay fecha o no"
     }
-  `;
+`;
 
 	private static readonly MERGE_PROMPT = `
     You are a task merger. You receive the original task and additional information in Spanish.
@@ -91,22 +113,21 @@ export class TaskProcessor {
         "title": "string",
         "description": "string",
         "duration": "very_short|short|medium|long",
-        "priority": "high|medium|low"
+        "priority": "high|medium|low",
+        "dueDate": "ISO date string or null"
       },
-      "summary": "string describing what was updated in Spanish"
+      "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date or not"
     }
 
-    Example response:
-    {
-      "task": {
-        "title": "Cambiar sábanas del dormitorio",
-        "description": "Cambiar las sábanas del dormitorio de Laura en lugar del dormitorio principal",
-        "duration": "quick_task",
-        "priority": "medium"
-      },
-      "summary": "Se actualizó la ubicación de la tarea del dormitorio principal al dormitorio de Laura"
-    }
-  `;
+    IMPORTANT:
+    - Preserve existing dueDate if not explicitly changed in the new information
+    - If new date is mentioned, update it
+    - ALWAYS include in the summary if there's a due date or not
+    - Example summaries:
+      "Se actualizó la descripción. La tarea está programada para mañana a las 10:00"
+      "Se actualizó la descripción. La tarea no tiene fecha establecida"
+      "Se actualizó la descripción y se cambió la fecha de la tarea para el viernes"
+`;
 
 	static async processTranscription(
 		transcription: string,
@@ -119,10 +140,57 @@ export class TaskProcessor {
 	}> {
 		try {
 			const openai = this.getOpenAIClient();
+
+			// Crear el prompt con la fecha actual
+			const currentDate = new Date();
+			const systemPrompt = `
+				You are a task analyzer. You receive transcribed audio messages in Spanish and extract task information.
+				Be practical and use common sense when analyzing tasks.
+
+				Analyze if the audio contains a valid task. A valid task should have:
+				- A clear action or objective (if you can understand what needs to be done, it's clear enough)
+
+				Use common sense for duration based on task complexity:
+				- very_short: Simple tasks that take less than an hour
+				- short: Tasks that typically take a few hours
+				- medium: Tasks that might take several days
+				- long: Complex tasks that take weeks
+
+				Use common sense for priority:
+				- high: Urgent or time-sensitive tasks
+				- medium: Regular, routine tasks
+				- low: Optional or non-urgent tasks
+
+				IMPORTANT FOR DATES:
+				- Pay special attention to date mentions like "el sábado", "mañana", "la próxima semana", etc.
+				- Current date is: ${currentDate.toISOString()}
+				- Today is ${currentDate.toLocaleDateString("es-ES", { weekday: "long" })}
+				- Convert relative dates to ISO format:
+				  * "mañana" -> next day at 10:00
+				  * "el sábado" -> next Saturday at 10:00
+				  * "la próxima semana" -> next Monday at 10:00
+				- If no specific time is mentioned, use 10:00 as default time
+				- If no date is mentioned, set dueDate to null
+
+				If it IS a valid task, analyze and respond with:
+				{
+				  "isValidTask": true,
+				  "task": {
+					"title": "string",
+					"description": "string",
+					"duration": "very_short|short|medium|long",
+					"priority": "high|medium|low",
+					"assignedTo": "string?",
+					"dueDate": "ISO date string or null"
+				  },
+				  "summary": "Un resumen en español de cómo se interpretó la tarea, SIEMPRE mencionar si hay fecha o no"
+				}
+			`;
+
 			const completion = await openai.chat.completions.create({
 				model: "gpt-4",
 				messages: [
-					{ role: "system", content: this.SYSTEM_PROMPT },
+					{ role: "system", content: systemPrompt },
 					{ role: "user", content: transcription },
 				],
 			});
@@ -153,6 +221,7 @@ export class TaskProcessor {
 				duration: result.task.duration || "medium",
 				priority: result.task.priority || "medium",
 				assignedTo: result.task.assignedTo || userId,
+				dueDate: result.task.dueDate,
 			};
 
 			return {
@@ -190,10 +259,39 @@ export class TaskProcessor {
 		if (!existingTask) throw new Error("Task not found");
 
 		const openai = this.getOpenAIClient();
+		const currentDate = new Date();
+		const mergePrompt = `
+			You are a task merger. You receive the original task and additional information in Spanish.
+			Combine them intelligently into a single coherent task.
+
+			IMPORTANT FOR DATES:
+			- Current date is: ${currentDate.toISOString()}
+			- Today is ${currentDate.toLocaleDateString("es-ES", { weekday: "long" })}
+			- If new date is mentioned in the additional information, UPDATE the dueDate
+			- If no new date is mentioned, keep the existing dueDate
+			- Convert relative dates to ISO format:
+			  * "mañana" -> next day at 10:00
+			  * "el sábado" -> next Saturday at 10:00
+			  * "la próxima semana" -> next Monday at 10:00
+			- If no specific time is mentioned, use 10:00 as default time
+
+			You MUST respond with a JSON object in this exact format:
+			{
+			  "task": {
+				"title": "string",
+				"description": "string",
+				"duration": "very_short|short|medium|long",
+				"priority": "high|medium|low",
+				"dueDate": "ISO date string or null"
+			  },
+			  "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date or not"
+			}
+		`;
+
 		const completion = await openai.chat.completions.create({
 			model: "gpt-4",
 			messages: [
-				{ role: "system", content: this.MERGE_PROMPT },
+				{ role: "system", content: mergePrompt },
 				{
 					role: "user",
 					content: JSON.stringify({

@@ -103,7 +103,8 @@ bot.on("message:voice", async (ctx) => {
 				`📝 *Tarea Actualizada*\n\n` +
 					`*Título:* ${updatedTask.taskData.title}\n` +
 					`*Duración:* ${formatDuration(updatedTask.taskData.duration)}\n` +
-					`*Prioridad:* ${formatPriority(updatedTask.taskData.priority)}\n\n` +
+					`*Prioridad:* ${formatPriority(updatedTask.taskData.priority)}\n` +
+					`*Fecha:* ${formatDate(updatedTask.taskData.dueDate)}\n\n` +
 					`*Descripción:*\n${updatedTask.taskData.description}\n\n` +
 					`¿Qué quieres hacer?`,
 				{
@@ -141,8 +142,9 @@ bot.on("message:voice", async (ctx) => {
 			`📝 *Nueva Tarea*\n\n` +
 				`*Título:* ${result.taskData.title}\n` +
 				`*Duración:* ${formatDuration(result.taskData.duration)}\n` +
-				`*Prioridad:* ${formatPriority(result.taskData.priority)}\n\n` +
-				`*Descripción:*\n${result.taskData.description}\n\n` +
+				`*Prioridad:* ${formatPriority(result.taskData.priority)}\n` +
+				`*Fecha:* ${formatDate(result.taskData.dueDate)}\n` +
+				`\n*Descripción:*\n${result.taskData.description}\n\n` +
 				`¿Qué quieres hacer?`,
 			{
 				parse_mode: "Markdown",
@@ -269,6 +271,10 @@ bot.callbackQuery("cancel_task", async (ctx) => {
 			await supabase.from("pending_tasks").delete().eq("id", recentTask.id);
 		}
 
+		// Eliminar el mensaje original con los botones
+		await ctx.deleteMessage();
+
+		// Enviar mensaje de cancelación como nuevo mensaje
 		await ctx.reply("❌ Tarea cancelada.");
 	} catch (error) {
 		console.error("Error canceling task:", error);
@@ -308,6 +314,22 @@ async function startBot() {
 	} catch (error) {
 		console.error("Error starting the bot:", error);
 	}
+}
+
+function formatDate(dateString: string | undefined | null): string {
+	if (!dateString) return "No especificada";
+
+	const date = new Date(dateString);
+	const weekDay = date.toLocaleDateString("es-ES", { weekday: "long" });
+	const formattedDate = date.toLocaleDateString("es-ES", {
+		day: "numeric",
+		month: "numeric",
+		year: "numeric",
+	});
+
+	// Capitalizar primera letra del día
+	const capitalizedWeekDay = weekDay.charAt(0).toUpperCase() + weekDay.slice(1);
+	return `${capitalizedWeekDay}, ${formattedDate}`;
 }
 
 startBot();

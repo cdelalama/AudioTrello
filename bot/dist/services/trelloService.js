@@ -61,16 +61,20 @@ class TrelloService {
         labelsToApply.push(labelMap[taskData.duration]);
         labelsToApply.push(labelMap[`${taskData.priority}_priority`]);
         // Create card with labels and member assignment
+        const cardData = {
+            name: taskData.title,
+            desc: taskData.description,
+            idList: user.default_list_id,
+            idLabels: labelsToApply,
+            idMembers: [memberId],
+        };
+        if (taskData.dueDate) {
+            cardData.due = taskData.dueDate;
+        }
         const response = await fetch(`https://api.trello.com/1/cards?key=${config_1.config.trello.apiKey}&token=${user.trello_token}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                name: taskData.title,
-                desc: taskData.description,
-                idList: user.default_list_id,
-                idLabels: labelsToApply,
-                idMembers: [memberId],
-            }),
+            body: JSON.stringify(cardData),
         });
         if (!response.ok) {
             const errorData = await response.text();

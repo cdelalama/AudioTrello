@@ -99,7 +99,8 @@ export interface TrelloTaskData {
 	description: string;
 	duration: TaskDuration;
 	priority: TaskPriority;
-	assignedTo?: string; // Opcional, por defecto será el usuario actual
+	assignedTo?: string;
+	dueDate: string | null;
 }
 
 export interface PendingTask {
@@ -137,6 +138,15 @@ export interface Config {
 	};
 	transcription: TranscriptionConfig;
 	trello: TrelloConfig;
+}
+
+export interface TrelloCardData {
+	name: string;
+	desc: string;
+	idList: string;
+	idLabels: string[];
+	idMembers: string[];
+	due?: string;
 }
 
 export {};

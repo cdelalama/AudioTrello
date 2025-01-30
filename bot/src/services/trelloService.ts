@@ -1,5 +1,5 @@
 import { config } from "../config";
-import { TrelloTaskData } from "../../types/types";
+import { TrelloTaskData, TrelloCardData } from "../../types/types";
 import { User } from "../../types/types";
 import { supabase } from "./supabaseClient";
 
@@ -58,7 +58,7 @@ export class TrelloService {
 		return labelMap;
 	}
 
-	public static async createCard(taskData: any, user: User) {
+	public static async createCard(taskData: TrelloTaskData, user: User) {
 		if (!user.trello_token || !user.default_board_id || !user.default_list_id) {
 			throw new Error("TRELLO_AUTH_REQUIRED");
 		}
@@ -80,18 +80,24 @@ export class TrelloService {
 		labelsToApply.push(labelMap[`${taskData.priority}_priority`]);
 
 		// Create card with labels and member assignment
+		const cardData: TrelloCardData = {
+			name: taskData.title,
+			desc: taskData.description,
+			idList: user.default_list_id,
+			idLabels: labelsToApply,
+			idMembers: [memberId],
+		};
+
+		if (taskData.dueDate) {
+			cardData.due = taskData.dueDate;
+		}
+
 		const response = await fetch(
 			`https://api.trello.com/1/cards?key=${config.trello.apiKey}&token=${user.trello_token}`,
 			{
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					name: taskData.title,
-					desc: taskData.description,
-					idList: user.default_list_id,
-					idLabels: labelsToApply,
-					idMembers: [memberId],
-				}),
+				body: JSON.stringify(cardData),
 			}
 		);
 
