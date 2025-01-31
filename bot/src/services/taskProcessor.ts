@@ -21,6 +21,8 @@ class DateAgent implements TaskAgent {
 }
 
 class ReminderAgent {
+	static approximationMessage: string | null = null;
+
 	private static readonly prompt = `
 		You are a Spanish reminder detection specialist. Your ONLY job is to find reminder requests.
 
@@ -32,97 +34,109 @@ class ReminderAgent {
 		Input examples:
 		- "quiero sacar a pasear a cooper el domingo y recuérdamelo dos horas antes"
 		- "avísame 2 hrs antes de la tarea"
-		- "recuérdame 2h antes"
-		- "2 horas antes por favor"
+		- "recuérdame 3h antes"
+		- "45 minutos antes por favor"
 		- "en 2hrs avisame"
+		- "avísame 4 días antes"
 
 		Rules:
-		1. ONLY return one of these exact values:
-		   - "2_hours_before" (for 2-4 hours)
-		   - "1_hour_before" (for 1 hour)
-		   - "15_minutes_before" (for 15-30 minutes)
-		   - "10_minutes_before" (for 5-15 minutes)
-		   - "5_minutes_before" (for < 5 minutes)
-		   - "1_day_before" (for 1 day)
-		   - "2_days_before" (for 2+ days)
+		1. Extract the EXACT time mentioned by the user and return it in this format:
+		   "<number>_hours" or "<number>_minutes" or "<number>_days"
+		   Examples:
+		   - "3_hours"
+		   - "45_minutes"
+		   - "4_days"
+		   - "1_hour"
+		   - "30_minutes"
+		   - "2_days"
 		   - "at_time" (for "en el momento")
 		   - null (if no reminder found)
 
 		2. Map variations:
-		   - "2 hrs/2h/2 horas/dos horas" -> "2_hours_before"
-		   - "1 hr/1h/una hora" -> "1_hour_before"
-		   - "30 min/media hora" -> "15_minutes_before"
-		   - "15 min/quince minutos" -> "15_minutes_before"
-		   - "10 min/diez minutos" -> "10_minutes_before"
-		   - "5 min/cinco minutos" -> "5_minutes_before"
-		   - "1 día/un día" -> "1_day_before"
-		   - "2 días/dos días" -> "2_days_before"
+		   - "tres horas" -> "3_hours"
+		   - "45 minutos" -> "45_minutes"
+		   - "media hora" -> "30_minutes"
+		   - "cuatro días" -> "4_days"
 
-		RESPOND ONLY with the reminder value or null. NO other text.
+		RESPOND ONLY with the exact time value or null. NO other text.
 	`;
 
 	static async analyze(text: string): Promise<TrelloReminderType> {
 		try {
-			// 1. Preprocesar el texto
+			this.approximationMessage = null;
 			const normalizedText = this.normalizeText(text);
 
-			// 2. Intentar primero con regex para casos comunes
-			const regexReminder = this.findReminderByRegex(normalizedText);
-			if (regexReminder) {
-				console.log("📢 Reminder found by regex:", regexReminder);
-				return regexReminder;
-			}
+			// Obtener el valor exacto mencionado por el usuario
+			const exactReminder = await this.findReminderByLLM(normalizedText);
+			console.log("🎯 LLM Reminder output:", exactReminder);
 
-			// 3. Si no hay match por regex, usar LLM
-			console.log("🤖 Using LLM for reminder detection...");
-			const llmReminder = await this.findReminderByLLM(normalizedText);
+			if (!exactReminder) return null;
 
-			// 4. Validar el resultado
-			if (!this.isValidReminder(llmReminder)) {
-				console.log("⚠️ Invalid reminder detected:", llmReminder);
-				return null;
-			}
+			// Aproximar al valor válido de Trello más cercano
+			const approximatedValue = this.approximateToTrelloValue(exactReminder);
+			console.log("📏 Approximated to:", approximatedValue);
+			console.log("💬 Approximation message:", this.approximationMessage);
 
-			return llmReminder;
+			return approximatedValue;
 		} catch (error) {
 			console.error("❌ Error in reminder detection:", error);
-			return null; // Fail gracefully
+			return null;
 		}
+	}
+
+	private static approximateToTrelloValue(exactReminder: string): TrelloReminderType {
+		if (exactReminder === "at_time") return "at_time";
+
+		// Extraer número y unidad
+		const match = exactReminder.match(/(\d+)_(\w+)/);
+		if (!match) return null;
+
+		const [, number, unit] = match;
+		const value = parseInt(number);
+
+		// Aproximar según las reglas de Trello
+		if (unit === "days") {
+			this.approximationMessage =
+				value > 2
+					? "Se ha ajustado tu recordatorio a 2 días antes, que es el máximo permitido por Trello."
+					: null;
+			return value > 2 ? "2_days_before" : value === 2 ? "2_days_before" : "1_day_before";
+		}
+
+		if (unit === "hours") {
+			if (value > 4) {
+				this.approximationMessage =
+					"Se ha ajustado tu recordatorio a 2 horas antes, que es el máximo permitido por Trello.";
+				return "2_hours_before";
+			}
+			if (value > 2) {
+				this.approximationMessage = `Se ha ajustado tu recordatorio de ${value} horas a 2 horas antes, debido a restricciones de Trello.`;
+				return "2_hours_before";
+			}
+			if (value === 2) return "2_hours_before";
+			return "1_hour_before";
+		}
+
+		if (unit === "minutes") {
+			if (value >= 30) {
+				this.approximationMessage =
+					"Se ha ajustado tu recordatorio a 15 minutos antes, que es el máximo permitido por Trello para minutos.";
+				return "15_minutes_before";
+			}
+			if (value > 15) return "15_minutes_before";
+			if (value > 10) return "15_minutes_before";
+			if (value > 5) return "10_minutes_before";
+			return "5_minutes_before";
+		}
+
+		return null;
 	}
 
 	private static normalizeText(text: string): string {
 		return text.toLowerCase().replace(/hrs?/g, "horas").replace(/mins?/g, "minutos");
 	}
 
-	private static findReminderByRegex(text: string): TrelloReminderType | null {
-		const patterns = [
-			{ regex: /2\s*(?:h|hr|hrs|horas)/, value: "2_hours_before" },
-			{ regex: /1\s*(?:h|hr|hrs|hora)/, value: "1_hour_before" },
-			// ... más patrones
-		];
-
-		for (const pattern of patterns) {
-			if (pattern.regex.test(text)) return pattern.value as TrelloReminderType;
-		}
-		return null;
-	}
-
-	private static isValidReminder(reminder: string | null): boolean {
-		const validReminders = [
-			"2_hours_before",
-			"1_hour_before",
-			"15_minutes_before",
-			"10_minutes_before",
-			"5_minutes_before",
-			"1_day_before",
-			"2_days_before",
-			"at_time",
-			null,
-		];
-		return validReminders.includes(reminder);
-	}
-
-	private static async findReminderByLLM(text: string): Promise<TrelloReminderType> {
+	private static async findReminderByLLM(text: string): Promise<string | null> {
 		const openai = new OpenAI({ apiKey: config.openai.apiKey! });
 
 		const completion = await openai.chat.completions.create({
@@ -134,7 +148,7 @@ class ReminderAgent {
 			temperature: 0,
 		});
 
-		return (completion.choices[0]?.message?.content?.trim() as TrelloReminderType) || null;
+		return completion.choices[0]?.message?.content?.trim() || null;
 	}
 }
 
@@ -332,7 +346,6 @@ export class TaskProcessor {
 	}> {
 		try {
 			console.log("\n📝 Processing transcription:", transcription);
-
 			const taskResult = await this.processMainTask(transcription);
 			console.log("✅ Main task result:", taskResult);
 
@@ -347,7 +360,7 @@ export class TaskProcessor {
 			const reminder = await ReminderAgent.analyze(transcription);
 			console.log("✨ Final reminder value:", reminder);
 
-			const taskData: TrelloTaskData = {
+			const taskData = {
 				title: taskResult.task.title,
 				description: taskResult.task.description,
 				duration: taskResult.task.duration,
@@ -357,16 +370,20 @@ export class TaskProcessor {
 				assignedTo: userId,
 			};
 
+			if (ReminderAgent.approximationMessage) {
+				taskData.description = `${taskData.description}\n\n⚠️ ${ReminderAgent.approximationMessage}`;
+			}
+
 			return {
 				isValidTask: true,
 				taskData,
 				summary: taskResult.summary,
 			};
 		} catch (error) {
-			console.error("❌ Error in processTranscription:", error);
+			console.error("Error processing transcription:", error);
 			return {
 				isValidTask: false,
-				message: "Hubo un error procesando la tarea. Por favor, inténtalo de nuevo.",
+				message: "Error al procesar la transcripción",
 			};
 		}
 	}
