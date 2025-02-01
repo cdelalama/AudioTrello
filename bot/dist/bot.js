@@ -84,7 +84,7 @@ bot.on("message:voice", async (ctx) => {
                 `*Título:* ${escapeMarkdown(updatedTask.taskData.title || "")}\n` +
                 `*Duración:* ${escapeMarkdown((0, formatters_1.formatDuration)(updatedTask.taskData.duration))}\n` +
                 `*Prioridad:* ${escapeMarkdown((0, formatters_1.formatPriority)(updatedTask.taskData.priority))}\n` +
-                `*Fecha:* ${escapeMarkdown(formatDate(updatedTask.taskData.dueDate))}\n` +
+                `*Fecha:* ${escapeMarkdown(await formatDate(updatedTask.taskData.dueDate, user.id))}\n` +
                 `*Recordatorio:* ${escapeMarkdown(formatReminder(updatedTask.taskData.reminder))}\n\n` +
                 `*Descripción:*\n${escapeMarkdown(updatedTask.taskData.description || "")}\n\n` +
                 `¿Qué quieres hacer?`, {
@@ -114,7 +114,7 @@ bot.on("message:voice", async (ctx) => {
             `*Título:* ${escapeMarkdown(result.taskData.title || "")}\n` +
             `*Duración:* ${escapeMarkdown((0, formatters_1.formatDuration)(result.taskData.duration))}\n` +
             `*Prioridad:* ${escapeMarkdown((0, formatters_1.formatPriority)(result.taskData.priority))}\n` +
-            `*Fecha:* ${escapeMarkdown(formatDate(result.taskData.dueDate))}\n` +
+            `*Fecha:* ${escapeMarkdown(await formatDate(result.taskData.dueDate, ctx.from.id))}\n` +
             `*Recordatorio:* ${escapeMarkdown(formatReminder(result.taskData.reminder))}\n\n` +
             `*Descripción:*\n${escapeMarkdown(result.taskData.description || "")}\n\n` +
             `¿Qué quieres hacer?`, {
@@ -261,6 +261,10 @@ async function startBot() {
         await TranscriptionServiceFactory_1.TranscriptionServiceFactory.validateServices();
         // Create initial admin user if needed
         await userService_1.userService.createInitialAdmin();
+        // Comprobar timezones de todos los usuarios al arrancar
+        await checkAllUsersTimezones();
+        // Configurar comprobación periódica cada 24 horas
+        setInterval(checkAllUsersTimezones, 24 * 60 * 60 * 1000);
         (0, console_1.showWelcomeBanner)();
         bot.start();
         console.log("Bot started successfully! 🚀");
@@ -269,21 +273,51 @@ async function startBot() {
         console.error("Error starting the bot:", error);
     }
 }
-function formatDate(dateString) {
+async function checkAllUsersTimezones() {
+    try {
+        const { data: users } = await supabaseClient_2.supabase
+            .from("users")
+            .select("id, timezone_last_updated, language_code")
+            .eq("is_active", true);
+        if (!users)
+            return;
+        const now = new Date();
+        for (const user of users) {
+            const lastUpdate = new Date(user.timezone_last_updated);
+            const daysSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysSinceUpdate >= 7) {
+                await userService_1.userService.updateUserTimezone(user.id, user.language_code);
+            }
+        }
+    }
+    catch (error) {
+        console.error("Error checking users timezones:", error);
+    }
+}
+async function formatDate(dateString, userId) {
     if (!dateString)
         return "No especificada";
     const date = new Date(dateString);
-    const weekDay = date.toLocaleDateString("es-ES", { weekday: "long" });
-    const formattedDate = date.toLocaleDateString("es-ES", {
+    // Obtener el offset del usuario de la base de datos
+    const user = await userService_1.userService.getUserByTelegramId(userId);
+    const userOffset = user?.timezone_offset || 60; // default a UTC+1 si no hay usuario
+    // Ajustar la fecha según el offset del usuario
+    const userDate = new Date(date.getTime() + userOffset * 60000);
+    const weekDay = userDate.toLocaleDateString("es-ES", {
+        weekday: "long",
+        timeZone: "UTC",
+    });
+    const formattedDate = userDate.toLocaleDateString("es-ES", {
         day: "numeric",
         month: "numeric",
         year: "numeric",
+        timeZone: "UTC",
     });
-    const formattedTime = date.toLocaleTimeString("es-ES", {
+    const formattedTime = userDate.toLocaleTimeString("es-ES", {
         hour: "2-digit",
         minute: "2-digit",
+        timeZone: "UTC",
     });
-    // Capitalizar primera letra del día
     const capitalizedWeekDay = weekDay.charAt(0).toUpperCase() + weekDay.slice(1);
     return `${capitalizedWeekDay}, ${formattedDate} ${formattedTime}`;
 }

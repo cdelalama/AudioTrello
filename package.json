@@ -4,6 +4,6 @@
     "@grammyjs/files": "^1.1.1",
     "@supabase/supabase-js": "^2.48.1",
     "dotenv": "^16.4.7",
-    "openai": "^4.80.1"
+    "openai": "^4.82.0"
   }
 }

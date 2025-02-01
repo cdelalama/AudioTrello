@@ -275,4 +275,36 @@ export const userService = {
 			return false;
 		}
 	},
+
+	async updateUserTimezone(userId: number, languageCode: string | undefined): Promise<void> {
+		try {
+			const now = new Date();
+			const isDST = this.isDaylightSavingTime(now);
+			const offset = isDST ? 120 : 60; // 120 minutos en verano, 60 en invierno
+
+			await supabase
+				.from("users")
+				.update({
+					language_code: languageCode || "es",
+					timezone_offset: offset,
+					timezone_last_updated: now.toISOString(),
+				})
+				.eq("id", userId);
+		} catch (error) {
+			console.error("Error updating user timezone:", error);
+		}
+	},
+
+	isDaylightSavingTime(date: Date): boolean {
+		const year = date.getFullYear();
+		const dstStart = this.getLastSunday(year, 2); // Marzo es 2 (0-based)
+		const dstEnd = this.getLastSunday(year, 9); // Octubre es 9 (0-based)
+		return date >= dstStart && date < dstEnd;
+	},
+
+	getLastSunday(year: number, month: number): Date {
+		const date = new Date(year, month + 1, 0); // Último día del mes
+		const lastSunday = new Date(date.setDate(date.getDate() - date.getDay()));
+		return lastSunday;
+	},
 };

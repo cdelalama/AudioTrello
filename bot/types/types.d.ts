@@ -58,6 +58,9 @@ export interface User {
 	default_list_name: string | null; // Añadir este campo
 	approval_requested: boolean; // Para saber si ya solicitó aprobación
 	waiting_for_token: boolean;
+	language_code: string;
+	timezone_offset: number;
+	timezone_last_updated: string;
 }
 
 declare global {

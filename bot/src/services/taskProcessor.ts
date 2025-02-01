@@ -4,19 +4,50 @@ import { config } from "../config";
 import { supabase } from "./supabaseClient";
 
 interface TaskAgent {
-	analyze(text: string): Promise<any>;
+	analyze(text: string, userId?: number): Promise<any>;
 }
 
 class DateAgent implements TaskAgent {
-	async analyze(text: string) {
-		const prompt = `
-			You are a date extraction specialist.
-			Current time: ${new Date().toISOString()}
-			Find and convert dates to ISO format.
-			Example: "el martes" -> "2024-02-04T19:09:00.000Z"
-			Return ONLY the ISO date or null.
-		`;
-		// ... implementación
+	private convertToUTC(localDate: string, userOffset: number): string {
+		const date = new Date(localDate);
+		// Restamos el offset para convertir de hora local a UTC
+		const utcDate = new Date(date.getTime() - userOffset * 60000);
+		return utcDate.toISOString();
+	}
+
+	async analyze(text: string, userId?: number) {
+		let userOffset = 60; // Default UTC+1
+		if (userId) {
+			const { data: user } = await supabase
+				.from("users")
+				.select("timezone_offset")
+				.eq("id", userId)
+				.single();
+
+			if (user) {
+				userOffset = user.timezone_offset;
+			}
+		}
+
+		// Aquí recibimos la fecha del taskResult.task.dueDate
+		// y la convertimos a UTC
+		return this.convertToUTC(text, userOffset);
+	}
+
+	private isDaylightSavingTime(date: Date): boolean {
+		// En España, el DST comienza el último domingo de marzo
+		// y termina el último domingo de octubre
+		const year = date.getFullYear();
+		const dstStart = this.getLastSunday(year, 2); // Marzo es 2 (0-based)
+		const dstEnd = this.getLastSunday(year, 9); // Octubre es 9 (0-based)
+
+		return date >= dstStart && date < dstEnd;
+	}
+
+	private getLastSunday(year: number, month: number): Date {
+		const date = new Date(year, month + 1, 0); // Último día del mes
+		const lastSunday = new Date(date.setDate(date.getDate() - date.getDay()));
+		return lastSunday;
 	}
 }
 
@@ -374,6 +405,14 @@ export class TaskProcessor {
 				taskData.description = `${taskData.description}\n\n⚠️ ${ReminderAgent.approximationMessage}`;
 			}
 
+			if (taskResult.task?.dueDate) {
+				// Convertir la fecha a UTC usando el DateAgent
+				taskData.dueDate = await this.agents.date.analyze(
+					taskData.dueDate,
+					parseInt(userId)
+				);
+			}
+
 			return {
 				isValidTask: true,
 				taskData,
@@ -540,5 +579,16 @@ export class TaskProcessor {
 		}
 
 		return JSON.parse(completion.choices[0].message.content);
+	}
+
+	static async processTask(transcription: string, userId: number) {
+		try {
+			// Modificar la llamada para pasar el userId
+			const dateResult = await this.agents.date.analyze(transcription, userId);
+			// ... resto del código
+		} catch (error) {
+			console.error("Error processing task:", error);
+			return null;
+		}
 	}
 }

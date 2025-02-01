@@ -21,6 +21,16 @@ export function setupStartCommand(bot: Bot) {
 
 			// Si el usuario ya está aprobado
 			if (user?.is_approved) {
+				// Actualizar timezone si han pasado más de 7 días
+				const lastUpdate = new Date(user.timezone_last_updated);
+				const now = new Date();
+				const daysSinceUpdate =
+					(now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24);
+
+				if (daysSinceUpdate >= 7) {
+					await userService.updateUserTimezone(user.id, ctx.from.language_code);
+				}
+
 				await ctx.reply(messages.welcome.approved);
 				await ctx.reply(helpMessages.start, {
 					parse_mode: "Markdown",
@@ -58,6 +68,9 @@ export function setupStartCommand(bot: Bot) {
 				default_board_name: null,
 				default_list_name: null,
 				waiting_for_token: false,
+				language_code: ctx.from.language_code || "es",
+				timezone_offset: 60,
+				timezone_last_updated: new Date().toISOString(),
 			});
 
 			const keyboard = new InlineKeyboard().text("Request Approval 🔑", "request_approval");
