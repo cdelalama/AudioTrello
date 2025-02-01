@@ -72,7 +72,9 @@ bot.on("message:voice", async (ctx) => {
 
 		const user = await userService.getUserByTelegramId(ctx.from.id);
 		if (!user) {
-			await ctx.reply("❌ Usuario no encontrado");
+			await ctx.reply(
+				"❌ Error al obtener los datos del usuario. Por favor, inténtalo de nuevo en unos segundos."
+			);
 			return;
 		}
 
@@ -94,7 +96,7 @@ bot.on("message:voice", async (ctx) => {
 		if (recentTask) {
 			// Añadir información a la tarea existente
 			const updatedTask = await TaskProcessor.appendToExistingTask(
-				recentTask.id,
+				recentTask.id.toString(),
 				transcription,
 				user.id.toString()
 			);
@@ -178,7 +180,9 @@ bot.on("message:voice", async (ctx) => {
 		);
 	} catch (error) {
 		console.error("Error processing voice message:", error);
-		await ctx.reply("⚠️ Error procesando el mensaje de voz. Por favor, inténtalo de nuevo.");
+		await ctx.reply(
+			"⚠️ Error procesando el mensaje de voz. Por favor, espera unos segundos antes de intentarlo de nuevo."
+		);
 	}
 });
 

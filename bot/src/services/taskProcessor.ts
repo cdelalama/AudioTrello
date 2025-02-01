@@ -29,8 +29,6 @@ class DateAgent implements TaskAgent {
 			}
 		}
 
-		// Aquí recibimos la fecha del taskResult.task.dueDate
-		// y la convertimos a UTC
 		return this.convertToUTC(text, userOffset);
 	}
 
@@ -366,19 +364,31 @@ export class TaskProcessor {
     Respond with ONLY the reminder value or null if no reminder is found.
 `;
 
-	static async processTranscription(
-		transcription: string,
-		userId: string
-	): Promise<{
-		taskData?: TrelloTaskData;
-		summary?: string;
-		isValidTask: boolean;
-		message?: string;
-	}> {
+	private static updateDescriptionWithReminder(
+		description: string,
+		approximationMessage: string | null
+	): string {
+		// Primero eliminamos cualquier mensaje de aproximación anterior
+		const cleanDescription = description.replace(
+			/\n\n⚠️ Se ha ajustado tu recordatorio.*$/s,
+			""
+		);
+
+		// Añadimos el nuevo mensaje si existe
+		if (approximationMessage) {
+			return `${cleanDescription}\n\n⚠️ ${approximationMessage}`;
+		}
+
+		return cleanDescription;
+	}
+
+	static async processTranscription(transcription: string, userId: string) {
 		try {
-			console.log("\n📝 Processing transcription:", transcription);
-			const taskResult = await this.processMainTask(transcription);
-			console.log("✅ Main task result:", taskResult);
+			// Ejecutar ambas llamadas en paralelo
+			const [taskResult, reminder] = await Promise.all([
+				this.processMainTask(transcription),
+				ReminderAgent.analyze(transcription),
+			]);
 
 			if (!taskResult.isValidTask || !taskResult.task) {
 				return {
@@ -386,10 +396,6 @@ export class TaskProcessor {
 					message: taskResult.message || "No se pudo procesar la tarea correctamente",
 				};
 			}
-
-			console.log("🕒 Analyzing reminder...");
-			const reminder = await ReminderAgent.analyze(transcription);
-			console.log("✨ Final reminder value:", reminder);
 
 			const taskData = {
 				title: taskResult.task.title,
@@ -401,12 +407,14 @@ export class TaskProcessor {
 				assignedTo: userId,
 			};
 
-			if (ReminderAgent.approximationMessage) {
-				taskData.description = `${taskData.description}\n\n⚠️ ${ReminderAgent.approximationMessage}`;
-			}
+			// Actualizar descripción con el mensaje de aproximación
+			taskData.description = this.updateDescriptionWithReminder(
+				taskData.description,
+				ReminderAgent.approximationMessage
+			);
 
-			if (taskResult.task?.dueDate) {
-				// Convertir la fecha a UTC usando el DateAgent
+			// Convertir la fecha a UTC si existe
+			if (taskData.dueDate) {
 				taskData.dueDate = await this.agents.date.analyze(
 					taskData.dueDate,
 					parseInt(userId)
@@ -442,91 +450,50 @@ export class TaskProcessor {
 	}
 
 	static async appendToExistingTask(
-		existingTaskId: number,
-		newTranscription: string,
+		taskId: number | string,
+		transcription: string,
 		userId: string
-	): Promise<{
-		taskData: TrelloTaskData;
-		summary: string;
-	}> {
-		const existingTask = await this.getActivePendingTask(
-			existingTaskId.toString(),
-			parseInt(userId)
-		);
-		if (!existingTask) throw new Error("Task not found");
+	) {
+		try {
+			// Ejecutar ambas llamadas en paralelo para la actualización
+			const [taskResult, reminder] = await Promise.all([
+				this.processMainTask(transcription),
+				ReminderAgent.analyze(transcription),
+			]);
 
-		const openai = this.getOpenAIClient();
-
-		const mergePrompt = `
-			You are a task merger. You receive the original task and additional information in Spanish.
-			Combine them intelligently into a single coherent task.
-
-			IMPORTANT FOR DATES:
-			- Current date is: ${this.currentDate.toISOString()}
-			- Current time is: ${this.currentHour}:${this.currentMinutes}
-			- When updating dates:
-			  * If no specific time is mentioned, use current time
-			  * For future dates without time, use same current time
-
-			IMPORTANT FOR DESCRIPTIONS:
-			- NEVER return null or empty descriptions
-			- If updating description, merge existing details with new ones
-			- If no new description details, keep existing one but ensure it's complete
-
-			IMPORTANT FOR REMINDERS:
-			- Use natural Spanish phrases for reminders
-			- Examples: "Una hora antes", "30 minutos antes", "2 días antes"
-			- If updating reminder, convert to natural format
-			- If no new reminder mentioned, keep existing one
-			- Do NOT use technical formats like "one_hour"
-
-			You MUST respond with a JSON object in this exact format:
-			{
-			  "task": {
-				"title": "string",
-				"description": "string",
-				"duration": "very_short|short|medium|long",
-				"priority": "high|medium|low",
-				"dueDate": "ISO date string or null",
-				"reminder": "one_day|one_hour|none|null"
-			  },
-			  "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date and reminder"
+			const existingTask = await this.getPendingTask(taskId.toString(), parseInt(userId));
+			if (!existingTask) {
+				throw new Error("Task not found");
 			}
-		`;
 
-		const completion = await openai.chat.completions.create({
-			model: "gpt-4",
-			messages: [
-				{ role: "system", content: mergePrompt },
-				{
-					role: "user",
-					content: JSON.stringify({
-						original: existingTask,
-						additional: newTranscription,
-					}),
-				},
-			],
-		});
+			// Actualizar solo los campos que vienen en el nuevo resultado
+			const updatedTask = {
+				...existingTask,
+				title: taskResult.task?.title || existingTask.title,
+				description: taskResult.task?.description || existingTask.description,
+				duration: taskResult.task?.duration || existingTask.duration,
+				priority: taskResult.task?.priority || existingTask.priority,
+				dueDate: taskResult.task?.dueDate || existingTask.dueDate,
+				reminder: reminder || existingTask.reminder,
+			};
 
-		if (!completion.choices?.[0]?.message?.content) {
-			throw new Error("Empty response from OpenAI");
+			// Actualizar descripción con el mensaje de aproximación
+			updatedTask.description = this.updateDescriptionWithReminder(
+				updatedTask.description,
+				ReminderAgent.approximationMessage
+			);
+
+			await this.updatePendingTask(taskId.toString(), updatedTask);
+
+			return {
+				isValidTask: true,
+				taskData: updatedTask,
+				summary: taskResult.summary,
+			};
+		} catch (error) {
+			console.error("Error appending to task:", error);
+			throw error;
 		}
-
-		const result = JSON.parse(completion.choices[0].message.content);
-		const combinedTask: TrelloTaskData = {
-			...result.task,
-			assignedTo: existingTask.assignedTo,
-		};
-
-		await supabase
-			.from("pending_tasks")
-			.update({ task_data: combinedTask })
-			.eq("id", existingTaskId);
-
-		return {
-			taskData: combinedTask,
-			summary: result.summary,
-		};
 	}
 
 	static async getRecentPendingTask(
@@ -548,9 +515,6 @@ export class TaskProcessor {
 	// Método para recuperar y eliminar una tarea
 	static async getPendingTask(taskId: string, userId: number): Promise<TrelloTaskData | null> {
 		const task = await this.getActivePendingTask(taskId, userId);
-		if (task) {
-			await supabase.from("pending_tasks").delete().eq("id", taskId);
-		}
 		return task;
 	}
 
@@ -590,5 +554,14 @@ export class TaskProcessor {
 			console.error("Error processing task:", error);
 			return null;
 		}
+	}
+
+	static async updatePendingTask(taskId: string, taskData: TrelloTaskData): Promise<void> {
+		const { error } = await supabase
+			.from("pending_tasks")
+			.update({ task_data: taskData })
+			.eq("id", taskId);
+
+		if (error) throw error;
 	}
 }

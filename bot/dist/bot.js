@@ -63,7 +63,7 @@ bot.on("message:voice", async (ctx) => {
         await ctx.reply("🔍 Procesando tu audio...");
         const user = await userService_1.userService.getUserByTelegramId(ctx.from.id);
         if (!user) {
-            await ctx.reply("❌ Usuario no encontrado");
+            await ctx.reply("❌ Error al obtener los datos del usuario. Por favor, inténtalo de nuevo en unos segundos.");
             return;
         }
         // Verificar configuración completa
@@ -78,7 +78,7 @@ bot.on("message:voice", async (ctx) => {
         const recentTask = await taskProcessor_1.TaskProcessor.getRecentPendingTask(user.id);
         if (recentTask) {
             // Añadir información a la tarea existente
-            const updatedTask = await taskProcessor_1.TaskProcessor.appendToExistingTask(recentTask.id, transcription, user.id.toString());
+            const updatedTask = await taskProcessor_1.TaskProcessor.appendToExistingTask(recentTask.id.toString(), transcription, user.id.toString());
             // Mostrar la tarea actualizada
             await ctx.reply(`📝 *Tarea Actualizada*\n\n` +
                 `*Título:* ${escapeMarkdown(updatedTask.taskData.title || "")}\n` +
@@ -134,7 +134,7 @@ bot.on("message:voice", async (ctx) => {
     }
     catch (error) {
         console.error("Error processing voice message:", error);
-        await ctx.reply("⚠️ Error procesando el mensaje de voz. Por favor, inténtalo de nuevo.");
+        await ctx.reply("⚠️ Error procesando el mensaje de voz. Por favor, espera unos segundos antes de intentarlo de nuevo.");
     }
 });
 // Manejador para archivos de audio

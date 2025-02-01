@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.userService = void 0;
 const supabaseClient_1 = require("./supabaseClient");
 const grammy_1 = require("grammy");
+// Cache de usuarios para edición
+const userCache = new Map();
 exports.userService = {
     // Verificar si un usuario existe y está aprobado
     async isValidUser(telegramId) {
@@ -28,33 +30,20 @@ exports.userService = {
     // Obtener usuario por Telegram ID
     async getUserByTelegramId(telegramId) {
         try {
-            const { data, error } = await supabaseClient_1.supabase
-                .from("users")
-                .select("*")
-                .eq("telegram_id", telegramId)
-                .single();
-            console.log("Raw user data from DB:", data);
-            if (error) {
-                console.error("Error getting user:", error);
-                return null;
+            // Comprobar cache (válido por 5 minutos)
+            const cached = userCache.get(telegramId);
+            if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+                return cached.user;
             }
-            // Verificar consistencia al obtener los datos
-            if (data &&
-                ((data.default_board_id && !data.default_board_name) ||
-                    (!data.default_board_id && data.default_board_name) ||
-                    (data.default_list_id && !data.default_list_name) ||
-                    (!data.default_list_id && data.default_list_name))) {
-                console.error("Inconsistent Trello configuration detected, cleaning...");
-                await this.cleanTrelloConfig(data.id);
-                // Volver a obtener los datos limpios
-                const { data: cleanData } = await supabaseClient_1.supabase
-                    .from("users")
-                    .select("*")
-                    .eq("telegram_id", telegramId)
-                    .single();
-                return cleanData;
+            // Si no está en cache, obtener de BD
+            let userData = await this.getUserFromDB(telegramId);
+            if (userData) {
+                userCache.set(telegramId, {
+                    user: userData,
+                    timestamp: Date.now(),
+                });
             }
-            return data;
+            return userData;
         }
         catch (error) {
             console.error("Error in getUserByTelegramId:", error);
@@ -273,5 +262,49 @@ exports.userService = {
         const date = new Date(year, month + 1, 0); // Último día del mes
         const lastSunday = new Date(date.setDate(date.getDate() - date.getDay()));
         return lastSunday;
+    },
+    async getUserFromDB(telegramId) {
+        let userData;
+        let retryCount = 0;
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 segundos
+        while (retryCount < maxRetries) {
+            const { data, error } = await supabaseClient_1.supabase
+                .from("users")
+                .select("*")
+                .eq("telegram_id", telegramId)
+                .single();
+            if (!error) {
+                userData = data;
+                break;
+            }
+            console.error(`Error getting user (attempt ${retryCount + 1}/${maxRetries}):`, error);
+            retryCount++;
+            if (retryCount < maxRetries) {
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            }
+        }
+        if (!userData) {
+            console.error(`Failed to get user after ${maxRetries} attempts`);
+            return null;
+        }
+        console.log("Raw user data from DB:", userData);
+        // Verificar consistencia al obtener los datos
+        if (userData &&
+            ((userData.default_board_id && !userData.default_board_name) ||
+                (!userData.default_board_id && userData.default_board_name) ||
+                (userData.default_list_id && !userData.default_list_name) ||
+                (!userData.default_list_id && userData.default_list_name))) {
+            console.error("Inconsistent Trello configuration detected, cleaning...");
+            await this.cleanTrelloConfig(userData.id);
+            // Volver a obtener los datos limpios
+            const { data: cleanData } = await supabaseClient_1.supabase
+                .from("users")
+                .select("*")
+                .eq("telegram_id", telegramId)
+                .single();
+            return cleanData;
+        }
+        return userData;
     },
 };

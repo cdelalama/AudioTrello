@@ -24,8 +24,6 @@ class DateAgent {
                 userOffset = user.timezone_offset;
             }
         }
-        // Aquí recibimos la fecha del taskResult.task.dueDate
-        // y la convertimos a UTC
         return this.convertToUTC(text, userOffset);
     }
     isDaylightSavingTime(date) {
@@ -214,20 +212,28 @@ class TaskProcessor {
         }
         return new openai_1.OpenAI({ apiKey: config_1.config.openai.apiKey });
     }
+    static updateDescriptionWithReminder(description, approximationMessage) {
+        // Primero eliminamos cualquier mensaje de aproximación anterior
+        const cleanDescription = description.replace(/\n\n⚠️ Se ha ajustado tu recordatorio.*$/s, "");
+        // Añadimos el nuevo mensaje si existe
+        if (approximationMessage) {
+            return `${cleanDescription}\n\n⚠️ ${approximationMessage}`;
+        }
+        return cleanDescription;
+    }
     static async processTranscription(transcription, userId) {
         try {
-            console.log("\n📝 Processing transcription:", transcription);
-            const taskResult = await this.processMainTask(transcription);
-            console.log("✅ Main task result:", taskResult);
+            // Ejecutar ambas llamadas en paralelo
+            const [taskResult, reminder] = await Promise.all([
+                this.processMainTask(transcription),
+                ReminderAgent.analyze(transcription),
+            ]);
             if (!taskResult.isValidTask || !taskResult.task) {
                 return {
                     isValidTask: false,
                     message: taskResult.message || "No se pudo procesar la tarea correctamente",
                 };
             }
-            console.log("🕒 Analyzing reminder...");
-            const reminder = await ReminderAgent.analyze(transcription);
-            console.log("✨ Final reminder value:", reminder);
             const taskData = {
                 title: taskResult.task.title,
                 description: taskResult.task.description,
@@ -237,11 +243,10 @@ class TaskProcessor {
                 reminder: reminder,
                 assignedTo: userId,
             };
-            if (ReminderAgent.approximationMessage) {
-                taskData.description = `${taskData.description}\n\n⚠️ ${ReminderAgent.approximationMessage}`;
-            }
-            if (taskResult.task?.dueDate) {
-                // Convertir la fecha a UTC usando el DateAgent
+            // Actualizar descripción con el mensaje de aproximación
+            taskData.description = this.updateDescriptionWithReminder(taskData.description, ReminderAgent.approximationMessage);
+            // Convertir la fecha a UTC si existe
+            if (taskData.dueDate) {
                 taskData.dueDate = await this.agents.date.analyze(taskData.dueDate, parseInt(userId));
             }
             return {
@@ -270,76 +275,40 @@ class TaskProcessor {
         };
         return colors[priority];
     }
-    static async appendToExistingTask(existingTaskId, newTranscription, userId) {
-        const existingTask = await this.getActivePendingTask(existingTaskId.toString(), parseInt(userId));
-        if (!existingTask)
-            throw new Error("Task not found");
-        const openai = this.getOpenAIClient();
-        const mergePrompt = `
-			You are a task merger. You receive the original task and additional information in Spanish.
-			Combine them intelligently into a single coherent task.
-
-			IMPORTANT FOR DATES:
-			- Current date is: ${this.currentDate.toISOString()}
-			- Current time is: ${this.currentHour}:${this.currentMinutes}
-			- When updating dates:
-			  * If no specific time is mentioned, use current time
-			  * For future dates without time, use same current time
-
-			IMPORTANT FOR DESCRIPTIONS:
-			- NEVER return null or empty descriptions
-			- If updating description, merge existing details with new ones
-			- If no new description details, keep existing one but ensure it's complete
-
-			IMPORTANT FOR REMINDERS:
-			- Use natural Spanish phrases for reminders
-			- Examples: "Una hora antes", "30 minutos antes", "2 días antes"
-			- If updating reminder, convert to natural format
-			- If no new reminder mentioned, keep existing one
-			- Do NOT use technical formats like "one_hour"
-
-			You MUST respond with a JSON object in this exact format:
-			{
-			  "task": {
-				"title": "string",
-				"description": "string",
-				"duration": "very_short|short|medium|long",
-				"priority": "high|medium|low",
-				"dueDate": "ISO date string or null",
-				"reminder": "one_day|one_hour|none|null"
-			  },
-			  "summary": "string describing what was updated in Spanish, ALWAYS mention if there's a due date and reminder"
-			}
-		`;
-        const completion = await openai.chat.completions.create({
-            model: "gpt-4",
-            messages: [
-                { role: "system", content: mergePrompt },
-                {
-                    role: "user",
-                    content: JSON.stringify({
-                        original: existingTask,
-                        additional: newTranscription,
-                    }),
-                },
-            ],
-        });
-        if (!completion.choices?.[0]?.message?.content) {
-            throw new Error("Empty response from OpenAI");
+    static async appendToExistingTask(taskId, transcription, userId) {
+        try {
+            // Ejecutar ambas llamadas en paralelo para la actualización
+            const [taskResult, reminder] = await Promise.all([
+                this.processMainTask(transcription),
+                ReminderAgent.analyze(transcription),
+            ]);
+            const existingTask = await this.getPendingTask(taskId.toString(), parseInt(userId));
+            if (!existingTask) {
+                throw new Error("Task not found");
+            }
+            // Actualizar solo los campos que vienen en el nuevo resultado
+            const updatedTask = {
+                ...existingTask,
+                title: taskResult.task?.title || existingTask.title,
+                description: taskResult.task?.description || existingTask.description,
+                duration: taskResult.task?.duration || existingTask.duration,
+                priority: taskResult.task?.priority || existingTask.priority,
+                dueDate: taskResult.task?.dueDate || existingTask.dueDate,
+                reminder: reminder || existingTask.reminder,
+            };
+            // Actualizar descripción con el mensaje de aproximación
+            updatedTask.description = this.updateDescriptionWithReminder(updatedTask.description, ReminderAgent.approximationMessage);
+            await this.updatePendingTask(taskId.toString(), updatedTask);
+            return {
+                isValidTask: true,
+                taskData: updatedTask,
+                summary: taskResult.summary,
+            };
         }
-        const result = JSON.parse(completion.choices[0].message.content);
-        const combinedTask = {
-            ...result.task,
-            assignedTo: existingTask.assignedTo,
-        };
-        await supabaseClient_1.supabase
-            .from("pending_tasks")
-            .update({ task_data: combinedTask })
-            .eq("id", existingTaskId);
-        return {
-            taskData: combinedTask,
-            summary: result.summary,
-        };
+        catch (error) {
+            console.error("Error appending to task:", error);
+            throw error;
+        }
     }
     static async getRecentPendingTask(userId) {
         const { data, error } = await supabaseClient_1.supabase
@@ -357,9 +326,6 @@ class TaskProcessor {
     // Método para recuperar y eliminar una tarea
     static async getPendingTask(taskId, userId) {
         const task = await this.getActivePendingTask(taskId, userId);
-        if (task) {
-            await supabaseClient_1.supabase.from("pending_tasks").delete().eq("id", taskId);
-        }
         return task;
     }
     static async deletePendingTask(taskId) {
@@ -394,6 +360,14 @@ class TaskProcessor {
             console.error("Error processing task:", error);
             return null;
         }
+    }
+    static async updatePendingTask(taskId, taskData) {
+        const { error } = await supabaseClient_1.supabase
+            .from("pending_tasks")
+            .update({ task_data: taskData })
+            .eq("id", taskId);
+        if (error)
+            throw error;
     }
 }
 exports.TaskProcessor = TaskProcessor;
