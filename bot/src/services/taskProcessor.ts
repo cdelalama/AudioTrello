@@ -498,6 +498,10 @@ export class TaskProcessor {
 				// Solo actualizar el reminder si se especifica uno nuevo
 				reminder: reminder !== null ? reminder : existingTask.reminder,
 				priority: existingTask.priority,
+				// Actualizar la fecha si se indica un nuevo dueDate, en caso contrario conservar la existente
+				dueDate: taskResult.task?.dueDate
+					? await this.agents.date.analyze(taskResult.task.dueDate, parseInt(userId))
+					: existingTask.dueDate,
 			};
 
 			// Actualizar la descripción con el mensaje de aproximación solo si hay un nuevo reminder
