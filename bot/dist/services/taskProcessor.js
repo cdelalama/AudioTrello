@@ -263,18 +263,6 @@ class TaskProcessor {
             };
         }
     }
-    static generateSummary(taskData) {
-        // Implementa la lógica para generar un resumen a partir de los datos de la tarea
-        return `Resumen de la tarea: ${taskData.title} - ${taskData.description}`;
-    }
-    static getPriorityColor(priority) {
-        const colors = {
-            high: "red",
-            medium: "yellow",
-            low: "green",
-        };
-        return colors[priority];
-    }
     static async appendToExistingTask(taskId, transcription, userId) {
         try {
             // Ejecutar ambas llamadas en paralelo para la actualización

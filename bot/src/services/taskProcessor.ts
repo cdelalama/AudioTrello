@@ -435,20 +435,6 @@ export class TaskProcessor {
 		}
 	}
 
-	private static generateSummary(taskData: TrelloTaskData): string {
-		// Implementa la lógica para generar un resumen a partir de los datos de la tarea
-		return `Resumen de la tarea: ${taskData.title} - ${taskData.description}`;
-	}
-
-	private static getPriorityColor(priority: TaskPriority): string {
-		const colors = {
-			high: "red",
-			medium: "yellow",
-			low: "green",
-		};
-		return colors[priority];
-	}
-
 	static async appendToExistingTask(
 		taskId: number | string,
 		transcription: string,
