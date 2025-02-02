@@ -71,7 +71,7 @@ class ReminderAgent {
         const [, number, unit] = match;
         const value = parseInt(number);
         // Aproximar según las reglas de Trello
-        if (unit === "days") {
+        if (unit === "days" || unit === "day") {
             this.approximationMessage =
                 value > 2
                     ? "Se ha ajustado tu recordatorio a 2 días antes, que es el máximo permitido por Trello."
@@ -283,53 +283,43 @@ class TaskProcessor {
     static async appendToExistingTask(taskId, transcription, userId) {
         try {
             console.log("📝 Starting appendToExistingTask with params:", { taskId, userId });
-            // Ejecutar ambas llamadas en paralelo para la actualización
             const [taskResult, reminder] = await Promise.all([
                 this.processMainTask(transcription),
                 ReminderAgent.analyze(transcription),
             ]);
-            console.log("🔄 Got results from processMainTask and ReminderAgent:", {
-                isValidTask: taskResult.isValidTask,
-                hasReminder: Boolean(reminder),
-                approximationMessage: ReminderAgent.approximationMessage,
-            });
-            // Obtener la tarea existente
             const existingTask = await this.getPendingTask(taskId, parseInt(userId));
-            console.log("📦 Retrieved existing task:", {
-                taskFound: Boolean(existingTask),
-                taskId,
-                taskData: existingTask,
-            });
             if (!existingTask) {
-                throw new Error("Task not found");
+                return { error: "Tarea no encontrada" };
             }
-            // Combinar la información existente con la nueva
+            if (!taskResult.isValidTask && !reminder) {
+                return {
+                    error: `No se han detectado cambios en el mensaje.\nHe entendido: "${transcription}"`,
+                };
+            }
+            // Actualizar la prioridad si se menciona
+            if (taskResult.task?.priority) {
+                existingTask.priority = taskResult.task.priority.toLowerCase();
+            }
             const updatedTaskData = {
                 ...existingTask,
                 description: taskResult.task?.description || existingTask.description || "",
-                reminder: reminder || existingTask.reminder,
+                // Solo actualizar el reminder si se especifica uno nuevo
+                reminder: reminder !== null ? reminder : existingTask.reminder,
+                priority: existingTask.priority,
             };
-            // Añadir el mensaje de aproximación si existe
-            updatedTaskData.description = this.updateDescriptionWithReminder(updatedTaskData.description, ReminderAgent.approximationMessage);
-            console.log("🔄 Combined task data:", {
-                hasDescription: Boolean(updatedTaskData.description),
-                hasReminder: Boolean(updatedTaskData.reminder),
-                approximationMessage: ReminderAgent.approximationMessage,
-                finalDescription: updatedTaskData.description,
-            });
-            return {
-                isValidTask: true,
-                taskData: updatedTaskData,
-            };
+            // Actualizar la descripción con el mensaje de aproximación solo si hay un nuevo reminder
+            updatedTaskData.description = this.updateDescriptionWithReminder(updatedTaskData.description, reminder ? ReminderAgent.approximationMessage : null);
+            // Persist updated task in the database so that subsequent updates use the new values
+            await this.updatePendingTask(taskId, updatedTaskData);
+            return { taskData: updatedTaskData };
         }
         catch (error) {
-            console.error("❌ Error in appendToExistingTask:", error);
-            throw error;
+            console.log("❌ Error en appendToExistingTask:", error);
+            return { error: "Error al procesar el mensaje" };
         }
     }
     static async getRecentPendingTask(telegramId) {
         console.log("🔍 Getting recent pending task for telegram_id:", telegramId);
-        // Primero obtenemos el ID de la base de datos del usuario
         const { data: userData, error: userError } = await supabaseClient_1.supabase
             .from("users")
             .select("id")
@@ -339,10 +329,9 @@ class TaskProcessor {
             console.error("Error getting user ID:", userError);
             return null;
         }
-        // Ahora buscamos la tarea usando el ID de la base de datos
         const { data, error } = await supabaseClient_1.supabase
             .from("pending_tasks")
-            .select("*") // Cambiado de "id, task_data" a "*"
+            .select("*")
             .eq("user_id", userData.id)
             .gt("expires_at", new Date().toISOString())
             .order("created_at", { ascending: false })
@@ -358,10 +347,8 @@ class TaskProcessor {
         }
         return data;
     }
-    // Método para recuperar y eliminar una tarea
     static async getPendingTask(taskId, telegramId) {
         console.log("🔍 Getting pending task:", { taskId, telegramId });
-        // Obtener directamente la tarea pendiente sin validar el usuario
         const { data, error } = await supabaseClient_1.supabase
             .from("pending_tasks")
             .select("task_data")
@@ -379,25 +366,37 @@ class TaskProcessor {
             throw error;
     }
     static async processMainTask(transcription) {
-        const openai = this.getOpenAIClient();
-        const completion = await openai.chat.completions.create({
-            model: "gpt-4",
-            messages: [
-                { role: "system", content: this.SYSTEM_PROMPT },
-                { role: "user", content: transcription },
-            ],
-        });
-        if (!completion.choices?.[0]?.message?.content) {
+        try {
+            const openai = this.getOpenAIClient();
+            const completion = await openai.chat.completions.create({
+                model: "gpt-4",
+                messages: [
+                    { role: "system", content: this.SYSTEM_PROMPT },
+                    { role: "user", content: transcription },
+                ],
+            });
+            if (!completion.choices?.[0]?.message?.content) {
+                return {
+                    isValidTask: false,
+                    message: "No se pudo entender el mensaje. Por favor, inténtalo de nuevo.",
+                };
+            }
+            const result = JSON.parse(completion.choices[0].message.content);
             return {
-                isValidTask: false,
-                message: "No se pudo procesar la tarea. Por favor, inténtalo de nuevo.",
+                ...result,
+                isValidTask: Boolean(result.task?.title || result.task?.priority || result.task?.description),
             };
         }
-        return JSON.parse(completion.choices[0].message.content);
+        catch (error) {
+            console.error("Error in processMainTask:", error);
+            return {
+                isValidTask: false,
+                message: "No se pudo entender el mensaje. ¿Podrías reformularlo?",
+            };
+        }
     }
     static async processTask(transcription, userId) {
         try {
-            // Modificar la llamada para pasar el userId
             const dateResult = await this.agents.date.analyze(transcription, userId);
             // ... resto del código
         }
@@ -445,6 +444,17 @@ TaskProcessor.SYSTEM_PROMPT = `
     - Generate clear and useful descriptions
     - Include relevant details and context
     - Add common sense details that would help complete the task
+
+    IMPORTANT FOR PRIORITIES:
+    - Detect priority changes in Spanish like:
+      * "quiero que la prioridad sea alta/baja/media"
+      * "cambiar prioridad a alta/baja/media"
+      * "prioridad alta/baja/media"
+    - Always return priority in lowercase: "high", "medium", "low"
+    - Map Spanish to English:
+      * alta -> high
+      * media -> medium
+      * baja -> low
 
     You MUST respond with a valid JSON object in this EXACT format:
     {

@@ -91,58 +91,33 @@ bot.on("message:voice", async (ctx) => {
 		);
 
 		if (recentTask) {
-			const updatedTask = await TaskProcessor.appendToExistingTask(
+			const result = await TaskProcessor.appendToExistingTask(
 				recentTask.id.toString(),
 				transcription,
 				user.telegram_id.toString()
 			);
 
+			if (result.error) {
+				await ctx.reply(`❓ ${result.error}`);
+				// Mostrar el resumen de la tarea actual
+				await showTaskSummary(
+					ctx,
+					recentTask.task_data,
+					user.timezone_offset,
+					recentTask.id
+				);
+				return;
+			}
+
 			console.log("✏️ Tarea actualizada:", {
 				id: recentTask.id,
-				descripción: updatedTask.taskData.description,
-				recordatorio: updatedTask.taskData.reminder,
+				descripción: result.taskData.description,
+				recordatorio: result.taskData.reminder,
 			});
 
-			// Pasar directamente el timezone_offset del usuario
-			const formattedDate = await formatDate(
-				updatedTask.taskData.dueDate,
-				user.timezone_offset
-			);
-
 			// Mostrar la tarea actualizada
-			await ctx.reply(
-				`📝 *Tarea Actualizada*\n\n` +
-					`*Título:* ${escapeMarkdown(updatedTask.taskData.title || "")}\n` +
-					`*Duración:* ${escapeMarkdown(
-						formatDuration(updatedTask.taskData.duration)
-					)}\n` +
-					`*Prioridad:* ${escapeMarkdown(
-						formatPriority(updatedTask.taskData.priority)
-					)}\n` +
-					`*Fecha:* ${escapeMarkdown(formattedDate)}\n` +
-					`*Recordatorio:* ${escapeMarkdown(
-						formatReminder(updatedTask.taskData.reminder)
-					)}\n\n` +
-					`*Descripción:*\n${escapeMarkdown(
-						updatedTask.taskData.description || ""
-					)}\n\n` +
-					`¿Qué quieres hacer?`,
-				{
-					parse_mode: "Markdown",
-					reply_markup: {
-						inline_keyboard: [
-							[
-								{
-									text: "✅ Crear tarea",
-									callback_data: `create_task:${recentTask.id}`,
-								},
-								{ text: "❌ Cancelar", callback_data: "cancel_task" },
-							],
-						],
-					},
-				}
-			);
-			return; // Importante: no seguir con el proceso de nueva tarea
+			await showTaskSummary(ctx, result.taskData, user.timezone_offset, recentTask.id);
+			return;
 		}
 
 		console.log("📋 Procesando como nueva tarea");
@@ -193,8 +168,8 @@ bot.on("message:voice", async (ctx) => {
 			}
 		);
 	} catch (error) {
-		console.error("❌ Error processing voice message:", error);
-		await ctx.reply("❌ Ha ocurrido un error al procesar el mensaje de voz.");
+		console.error("❌ Error general:", error);
+		await ctx.reply("❌ Ha ocurrido un error inesperado.");
 	}
 });
 
@@ -204,7 +179,7 @@ bot.on("message:audio", async (ctx) => {
 		await ctx.reply("🔍 Processing your audio...");
 		const file = await ctx.getFile();
 		const transcription = await AudioProcessor.processAudioFile(file);
-		await ctx.reply(`�� Transcription:\n${transcription}`);
+		await ctx.reply(` Transcription:\n${transcription}`);
 	} catch (error) {
 		console.error("Error processing audio file:", error);
 		await ctx.reply("⚠️ Error processing audio. Please try again.");
@@ -417,6 +392,35 @@ function escapeMarkdown(text: string | null | undefined): string {
 	if (!text) return "";
 	// Escapar caracteres especiales de Markdown
 	return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
+
+// Función auxiliar para mostrar el resumen de la tarea
+async function showTaskSummary(ctx: any, taskData: any, timezone_offset: number, taskId: string) {
+	const formattedDate = await formatDate(taskData.dueDate, timezone_offset);
+	await ctx.reply(
+		`📝 *Tarea Actual:*\n` +
+			`*Título:* ${escapeMarkdown(taskData.title || "")}\n` +
+			`*Duración:* ${escapeMarkdown(formatDuration(taskData.duration))}\n` +
+			`*Prioridad:* ${escapeMarkdown(formatPriority(taskData.priority))}\n` +
+			`*Fecha:* ${escapeMarkdown(formattedDate)}\n` +
+			`*Recordatorio:* ${escapeMarkdown(formatReminder(taskData.reminder))}\n\n` +
+			`*Descripción:*\n${escapeMarkdown(taskData.description || "")}\n\n` +
+			`¿Qué quieres hacer?`,
+		{
+			parse_mode: "Markdown",
+			reply_markup: {
+				inline_keyboard: [
+					[
+						{
+							text: "✅ Crear tarea",
+							callback_data: `create_task:${taskId}`,
+						},
+						{ text: "❌ Cancelar", callback_data: "cancel_task" },
+					],
+				],
+			},
+		}
+	);
 }
 
 startBot();
