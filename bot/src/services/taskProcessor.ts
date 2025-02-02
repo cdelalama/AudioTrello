@@ -1,4 +1,4 @@
-import { TrelloTaskData, TaskDuration, TaskPriority, TrelloReminderType } from "../../types/types";
+import { TrelloTaskData, TrelloReminderType } from "../../types/types";
 import { OpenAI } from "openai";
 import { config } from "../config";
 import { supabase } from "./supabaseClient";
@@ -207,20 +207,41 @@ export class TaskProcessor {
 	};
 
 	// Método para almacenar una tarea y obtener su ID
-	static async storePendingTask(task: TrelloTaskData, userId: number): Promise<string> {
-		const expiresAt = new Date(Date.now() + this.TASK_EXPIRATION);
+	static async storePendingTask(taskData: TrelloTaskData, userId: number) {
+		console.log("💾 Storing pending task. User data:", {
+			providedUserId: userId,
+			taskAssignedTo: taskData.assignedTo,
+		});
+
+		// Obtener el ID de la base de datos del usuario usando el telegram_id
+		const { data: userData, error: userError } = await supabase
+			.from("users")
+			.select("id")
+			.eq("telegram_id", userId)
+			.single();
+
+		if (userError) {
+			console.error("Error getting user ID:", userError);
+			throw userError;
+		}
+
+		const expirationDate = new Date();
+		expirationDate.setMinutes(expirationDate.getMinutes() + 30);
 
 		const { data, error } = await supabase
 			.from("pending_tasks")
 			.insert({
-				task_data: task,
-				user_id: userId,
-				expires_at: expiresAt.toISOString(),
+				task_data: taskData,
+				user_id: userData.id, // Usamos el ID de la base de datos
+				expires_at: expirationDate.toISOString(),
 			})
 			.select("id")
 			.single();
 
-		if (error) throw error;
+		if (error) {
+			console.error("Error storing pending task:", error);
+			throw error;
+		}
 		return data.id;
 	}
 
@@ -435,73 +456,118 @@ export class TaskProcessor {
 		}
 	}
 
-	static async appendToExistingTask(
-		taskId: number | string,
-		transcription: string,
-		userId: string
-	) {
+	static async appendToExistingTask(taskId: string, transcription: string, userId: string) {
 		try {
+			console.log("📝 Starting appendToExistingTask with params:", { taskId, userId });
+
 			// Ejecutar ambas llamadas en paralelo para la actualización
 			const [taskResult, reminder] = await Promise.all([
 				this.processMainTask(transcription),
 				ReminderAgent.analyze(transcription),
 			]);
 
-			const existingTask = await this.getPendingTask(taskId.toString(), parseInt(userId));
+			console.log("🔄 Got results from processMainTask and ReminderAgent:", {
+				isValidTask: taskResult.isValidTask,
+				hasReminder: Boolean(reminder),
+				approximationMessage: ReminderAgent.approximationMessage,
+			});
+
+			// Obtener la tarea existente
+			const existingTask = await this.getPendingTask(taskId, parseInt(userId));
+			console.log("📦 Retrieved existing task:", {
+				taskFound: Boolean(existingTask),
+				taskId,
+				taskData: existingTask,
+			});
+
 			if (!existingTask) {
 				throw new Error("Task not found");
 			}
 
-			// Actualizar solo los campos que vienen en el nuevo resultado
-			const updatedTask = {
+			// Combinar la información existente con la nueva
+			const updatedTaskData = {
 				...existingTask,
-				title: taskResult.task?.title || existingTask.title,
-				description: taskResult.task?.description || existingTask.description,
-				duration: taskResult.task?.duration || existingTask.duration,
-				priority: taskResult.task?.priority || existingTask.priority,
-				dueDate: taskResult.task?.dueDate || existingTask.dueDate,
+				description: taskResult.task?.description || existingTask.description || "",
 				reminder: reminder || existingTask.reminder,
 			};
 
-			// Actualizar descripción con el mensaje de aproximación
-			updatedTask.description = this.updateDescriptionWithReminder(
-				updatedTask.description,
+			// Añadir el mensaje de aproximación si existe
+			updatedTaskData.description = this.updateDescriptionWithReminder(
+				updatedTaskData.description,
 				ReminderAgent.approximationMessage
 			);
 
-			await this.updatePendingTask(taskId.toString(), updatedTask);
+			console.log("🔄 Combined task data:", {
+				hasDescription: Boolean(updatedTaskData.description),
+				hasReminder: Boolean(updatedTaskData.reminder),
+				approximationMessage: ReminderAgent.approximationMessage,
+				finalDescription: updatedTaskData.description,
+			});
 
 			return {
 				isValidTask: true,
-				taskData: updatedTask,
-				summary: taskResult.summary,
+				taskData: updatedTaskData,
 			};
 		} catch (error) {
-			console.error("Error appending to task:", error);
+			console.error("❌ Error in appendToExistingTask:", error);
 			throw error;
 		}
 	}
 
-	static async getRecentPendingTask(
-		userId: number
-	): Promise<{ id: number; task_data: TrelloTaskData } | null> {
+	static async getRecentPendingTask(telegramId: number) {
+		console.log("🔍 Getting recent pending task for telegram_id:", telegramId);
+
+		// Primero obtenemos el ID de la base de datos del usuario
+		const { data: userData, error: userError } = await supabase
+			.from("users")
+			.select("id")
+			.eq("telegram_id", telegramId)
+			.single();
+
+		if (userError) {
+			console.error("Error getting user ID:", userError);
+			return null;
+		}
+
+		// Ahora buscamos la tarea usando el ID de la base de datos
 		const { data, error } = await supabase
 			.from("pending_tasks")
-			.select("id, task_data")
-			.eq("user_id", userId)
+			.select("*") // Cambiado de "id, task_data" a "*"
+			.eq("user_id", userData.id)
 			.gt("expires_at", new Date().toISOString())
 			.order("created_at", { ascending: false })
 			.limit(1)
 			.single();
 
-		if (error) return null;
+		if (error?.code === "PGRST116") {
+			console.log("ℹ️ No pending tasks found for user");
+			return null;
+		}
+
+		if (error) {
+			console.error("Error getting pending task:", error);
+			return null;
+		}
 		return data;
 	}
 
 	// Método para recuperar y eliminar una tarea
-	static async getPendingTask(taskId: string, userId: number): Promise<TrelloTaskData | null> {
-		const task = await this.getActivePendingTask(taskId, userId);
-		return task;
+	static async getPendingTask(taskId: string, telegramId: number) {
+		console.log("🔍 Getting pending task:", { taskId, telegramId });
+
+		// Obtener directamente la tarea pendiente sin validar el usuario
+		const { data, error } = await supabase
+			.from("pending_tasks")
+			.select("task_data")
+			.eq("id", taskId)
+			.single();
+
+		if (error) {
+			console.error("Error getting pending task:", error);
+			return null;
+		}
+
+		return data?.task_data;
 	}
 
 	static async deletePendingTask(taskId: string): Promise<void> {
