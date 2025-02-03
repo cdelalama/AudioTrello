@@ -604,8 +604,18 @@ export class TaskProcessor {
 					result.task?.title || result.task?.priority || result.task?.description
 				),
 			};
-		} catch (error) {
+		} catch (error: any) {
 			console.error("Error in processMainTask:", error);
+
+			// Mensaje específico para error de cuota de OpenAI
+			if (error?.status === 429 || error?.error?.code === "insufficient_quota") {
+				return {
+					isValidTask: false,
+					message:
+						"Lo siento, en este momento hay un problema técnico con el servicio de procesamiento de texto (cuota de OpenAI excedida). Por favor, contacta con el administrador o inténtalo más tarde.",
+				};
+			}
+
 			return {
 				isValidTask: false,
 				message: "No se pudo entender el mensaje. ¿Podrías reformularlo?",
