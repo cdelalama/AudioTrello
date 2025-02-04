@@ -182,13 +182,90 @@ class ReminderAgent {
 }
 
 class TaskDetailsAgent implements TaskAgent {
-	async analyze(text: string) {
-		const prompt = `
-			You are a task details specialist.
-			Extract: title, description, duration, priority
-			Return JSON with these fields only.
-		`;
-		// ... implementación
+	private static readonly TASK_DETAILS_PROMPT = `
+	You are a task details specialist. You receive transcribed audio messages in Spanish and extract task information.
+
+	IMPORTANT FOR DESCRIPTIONS:
+	- Generate clear and useful descriptions
+	- Include relevant details and context
+	- Add common sense details that would help complete the task
+
+	IMPORTANT FOR PRIORITIES:
+	- Detect priority changes in Spanish like:
+	  * "quiero que la prioridad sea alta/baja/media"
+	  * "cambiar prioridad a alta/baja/media"
+	  * "prioridad alta/baja/media"
+	- Always return priority in lowercase: "high", "medium", "low"
+	- Map Spanish to English:
+	  * alta -> high
+	  * media -> medium
+	  * baja -> low
+
+	You MUST respond with a valid JSON object in this EXACT format:
+	{
+	  "isValidTask": true,
+	  "task": {
+		"title": "string",
+		"description": "string",
+		"duration": "very_short|short|medium|long",
+		"priority": "high|medium|low"
+	  },
+	  "summary": "string"
+	}
+
+	DO NOT include any additional text or explanations outside the JSON object.
+	The response MUST be a valid parseable JSON.
+	`;
+
+	private getOpenAIClient() {
+		if (!config.openai.apiKey) {
+			throw new Error("OpenAI API key is not configured");
+		}
+		return new OpenAI({ apiKey: config.openai.apiKey });
+	}
+
+	async analyze(text: string): Promise<any> {
+		try {
+			const openai = this.getOpenAIClient();
+
+			const completion = await openai.chat.completions.create({
+				model: "gpt-4",
+				messages: [
+					{ role: "system", content: TaskDetailsAgent.TASK_DETAILS_PROMPT },
+					{ role: "user", content: text },
+				],
+			});
+
+			if (!completion.choices?.[0]?.message?.content) {
+				return {
+					isValidTask: false,
+					message: "No se pudo entender el mensaje. Por favor, inténtalo de nuevo.",
+				};
+			}
+
+			const result = JSON.parse(completion.choices[0].message.content);
+			return {
+				...result,
+				isValidTask: Boolean(
+					result.task?.title || result.task?.priority || result.task?.description
+				),
+			};
+		} catch (error: any) {
+			console.error("Error in TaskDetailsAgent:", error);
+
+			if (error?.status === 429 || error?.error?.code === "insufficient_quota") {
+				return {
+					isValidTask: false,
+					message:
+						"Lo siento, en este momento hay un problema técnico con el servicio de procesamiento de texto (cuota de OpenAI excedida). Por favor, contacta con el administrador o inténtalo más tarde.",
+				};
+			}
+
+			return {
+				isValidTask: false,
+				message: "No se pudo entender el mensaje. ¿Podrías reformularlo?",
+			};
+		}
 	}
 }
 
@@ -275,7 +352,7 @@ export class TaskProcessor {
 	}
 
 	private static readonly SYSTEM_PROMPT = `
-    You are a task analyzer. You receive transcribed audio messages in Spanish and extract task information.
+    You are a task merger. You receive the original task and additional information in Spanish.
 
     IMPORTANT FOR DATES:
     - Current date and time: ${this.currentDate.toISOString()}
@@ -387,7 +464,7 @@ export class TaskProcessor {
 		try {
 			// Ejecutar ambas llamadas en paralelo
 			const [taskResult, reminder] = await Promise.all([
-				this.processMainTask(transcription),
+				this.agents.details.analyze(transcription),
 				ReminderAgent.analyze(transcription),
 			]);
 
@@ -440,49 +517,79 @@ export class TaskProcessor {
 		try {
 			console.log("📝 Starting appendToExistingTask with params:", { taskId, userId });
 
-			const [taskResult, reminder] = await Promise.all([
-				this.processMainTask(transcription),
-				ReminderAgent.analyze(transcription),
-			]);
-
+			// Obtener la tarea existente
 			const existingTask = await this.getPendingTask(taskId, parseInt(userId));
 			if (!existingTask) {
 				return { error: "Tarea no encontrada" };
 			}
 
-			if (!taskResult.isValidTask && !reminder) {
-				return {
-					error: `No se han detectado cambios en el mensaje.\nHe entendido: "${transcription}"`,
+			// Obtener el reminder por separado ya que tiene su propia lógica especializada
+			const reminder = await ReminderAgent.analyze(transcription);
+
+			// Usar MERGE_PROMPT para combinar la información
+			const openai = this.getOpenAIClient();
+			try {
+				const completion = await openai.chat.completions.create({
+					model: "gpt-4",
+					messages: [
+						{ role: "system", content: this.MERGE_PROMPT },
+						{
+							role: "user",
+							content: JSON.stringify({
+								originalTask: existingTask,
+								additionalInfo: transcription,
+							}),
+						},
+					],
+				});
+
+				if (!completion.choices?.[0]?.message?.content) {
+					return { error: "No se pudo procesar la actualización" };
+				}
+
+				const mergeResult = JSON.parse(completion.choices[0].message.content);
+
+				// Actualizar la tarea con los resultados combinados
+				const updatedTaskData = {
+					...existingTask,
+					...mergeResult.task,
+					// Usar el reminder del ReminderAgent si existe, sino mantener el existente
+					reminder: reminder !== null ? reminder : existingTask.reminder,
 				};
+
+				// Convertir la fecha a UTC si existe
+				if (updatedTaskData.dueDate) {
+					updatedTaskData.dueDate = await this.agents.date.analyze(
+						updatedTaskData.dueDate,
+						parseInt(userId)
+					);
+				}
+
+				// Actualizar la descripción con el mensaje de aproximación si hay nuevo reminder
+				updatedTaskData.description = this.updateDescriptionWithReminder(
+					updatedTaskData.description,
+					reminder ? ReminderAgent.approximationMessage : null
+				);
+
+				// Persistir la tarea actualizada
+				await this.updatePendingTask(taskId, updatedTaskData);
+
+				return {
+					taskData: updatedTaskData,
+					summary: mergeResult.summary,
+				};
+			} catch (error: any) {
+				console.error("❌ Error en merge de tarea:", error);
+
+				// Mensaje específico para error de cuota de OpenAI
+				if (error?.status === 429 || error?.error?.code === "insufficient_quota") {
+					return {
+						error: "Lo siento, en este momento hay un problema técnico con el servicio de procesamiento de texto (cuota de OpenAI excedida). Por favor, contacta con el administrador o inténtalo más tarde.",
+					};
+				}
+
+				return { error: "Error al procesar la actualización" };
 			}
-
-			// Actualizar la prioridad si se menciona
-			if (taskResult.task?.priority) {
-				existingTask.priority = taskResult.task.priority.toLowerCase();
-			}
-
-			const updatedTaskData = {
-				...existingTask,
-				description: taskResult.task?.description || existingTask.description || "",
-				// Solo actualizar el reminder si se especifica uno nuevo
-				reminder: reminder !== null ? reminder : existingTask.reminder,
-				priority: existingTask.priority,
-				// Actualizar la fecha si se indica un nuevo dueDate, en caso contrario conservar la existente
-				dueDate: taskResult.task?.dueDate
-					? await this.agents.date.analyze(taskResult.task.dueDate, parseInt(userId))
-					: existingTask.dueDate,
-			};
-
-			// Actualizar la descripción con el mensaje de aproximación solo si hay un nuevo reminder
-			updatedTaskData.description = this.updateDescriptionWithReminder(
-				updatedTaskData.description,
-				reminder ? ReminderAgent.approximationMessage : null
-			);
-
-			// Persist updated task in the database so that subsequent updates use the new values
-			await this.updatePendingTask(taskId, updatedTaskData);
-
-			return { taskData: updatedTaskData };
 		} catch (error) {
 			console.log("❌ Error en appendToExistingTask:", error);
 			return { error: "Error al procesar el mensaje" };
@@ -545,61 +652,6 @@ export class TaskProcessor {
 		const { error } = await supabase.from("pending_tasks").delete().eq("id", taskId);
 
 		if (error) throw error;
-	}
-
-	static async processMainTask(transcription: string) {
-		try {
-			const openai = this.getOpenAIClient();
-
-			const completion = await openai.chat.completions.create({
-				model: "gpt-4",
-				messages: [
-					{ role: "system", content: this.SYSTEM_PROMPT },
-					{ role: "user", content: transcription },
-				],
-			});
-
-			if (!completion.choices?.[0]?.message?.content) {
-				return {
-					isValidTask: false,
-					message: "No se pudo entender el mensaje. Por favor, inténtalo de nuevo.",
-				};
-			}
-
-			const result = JSON.parse(completion.choices[0].message.content);
-			return {
-				...result,
-				isValidTask: Boolean(
-					result.task?.title || result.task?.priority || result.task?.description
-				),
-			};
-		} catch (error: any) {
-			console.error("Error in processMainTask:", error);
-
-			// Mensaje específico para error de cuota de OpenAI
-			if (error?.status === 429 || error?.error?.code === "insufficient_quota") {
-				return {
-					isValidTask: false,
-					message:
-						"Lo siento, en este momento hay un problema técnico con el servicio de procesamiento de texto (cuota de OpenAI excedida). Por favor, contacta con el administrador o inténtalo más tarde.",
-				};
-			}
-
-			return {
-				isValidTask: false,
-				message: "No se pudo entender el mensaje. ¿Podrías reformularlo?",
-			};
-		}
-	}
-
-	static async processTask(transcription: string, userId: number) {
-		try {
-			const dateResult = await this.agents.date.analyze(transcription, userId);
-			// ... resto del código
-		} catch (error) {
-			console.error("Error processing task:", error);
-			return null;
-		}
 	}
 
 	static async updatePendingTask(taskId: string, taskData: TrelloTaskData): Promise<void> {
