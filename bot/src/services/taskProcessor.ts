@@ -365,37 +365,6 @@ export class TaskProcessor {
       "Se actualizó la descripción y se cambió la fecha de la tarea para el viernes"
 `;
 
-	private static readonly reminderPrompt = `
-    You are a reminder analyzer. Analyze the Spanish text and extract ONLY reminder information.
-    Return ONE of these specific values or null:
-    * "at_time" -> "en el momento"
-    * "5_minutes_before" -> "5 minutos antes"
-    * "10_minutes_before" -> "10 minutos antes"
-    * "15_minutes_before" -> "15 minutos antes"
-    * "1_hour_before" -> "una hora antes"
-    * "2_hours_before" -> "dos horas antes"
-    * "1_day_before" -> "un día antes"
-    * "2_days_before" -> "dos días antes"
-
-    Common Spanish phrases to detect:
-    * "recuérdamelo/avísame/recuérdame/avisa X antes"
-    * "X horas/minutos/días antes"
-    Where X can be any number or word (uno/una, dos, tres, cuatro...)
-
-    Map to closest available option:
-    * 3-4 horas -> "2_hours_before"
-    * 1-2 horas -> "1_hour_before"
-    * 20-30 minutos -> "15_minutes_before"
-    * 1-2 días -> "1_day_before"
-
-    Examples:
-    "quiero hacer algo el martes y avísame cuatro horas antes" -> "2_hours_before"
-    "recuérdamelo tres horas antes" -> "2_hours_before"
-    "avísame media hora antes" -> "15_minutes_before"
-
-    Respond with ONLY the reminder value or null if no reminder is found.
-`;
-
 	private static updateDescriptionWithReminder(
 		description: string,
 		approximationMessage: string | null
